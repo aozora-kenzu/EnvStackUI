@@ -1,0 +1,26 @@
+# Dependencies & Build artifacts
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# Portable runtime data (never commit user binaries/data)
+.portable_dev/
+bin/
+data/
+etc/
+logs/
+tmp/
+usr/
+www/
+envstack.json
+
+# OS & Editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
