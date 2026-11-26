@@ -18,9 +18,10 @@ Fast, clean, zero-nag, 100% portable `.exe` — manage **Nginx**, **Apache**, **
 
 ## Key Features
 
-- **100% Portable & Zero Nag** — Single standalone `.exe` (~15 MB). No installer, no license popups, no background bloat, no OS pollution.
-- **Core Local Services** — Start, stop, restart, and switch versions for **Nginx**, **Apache**, **PHP FastCGI** (auto-respawn supervisor + TS/NTS detection), **MariaDB / MySQL** (auto-initialized `data/`), and **Mailpit** (SMTP + Web UI).
-- **Auto Virtual Hosts & Local HTTPS (`*.test`)** — Watches your `www/` folder, auto-detects `/public` (Laravel/Symfony), generates Nginx & Apache configs, issues trusted local TLS certificates via **EnvStackUI Local Dev CA**, and uses **On-Demand UAC** only when trusting the Root CA or syncing Windows `hosts`.
+- **100% Portable & Zero Nag** — Single standalone `.exe` (~16 MB). No installer, no license popups, no background bloat, no OS pollution.
+- **Core Local Services** — Start, stop, restart, restart all, and switch versions for **Apache** (default ports `80 / 443`, `LogFormat` + `mod_php` / Windows FastCGI), **Nginx** (ports `8080 / 8443`), **PHP FastCGI** (auto-respawn supervisor + TS/NTS detection), **MariaDB / MySQL** (auto-initialized `data/` + graceful shutdown), and **Mailpit** (SMTP + Web UI). Includes pre-start config syntax validation (`httpd -t` / `nginx -t`) and port-conflict process diagnostics.
+- **One-Click PHP Extensions & Xdebug** — Toggle PHP extensions (`gd`, `intl`, `zip`, `curl`, `xdebug`, etc.) inside `etc/php/php.ini` cleanly without manual editing.
+- **Auto Virtual Hosts, Linked Projects & Local HTTPS (`*.test`)** — Watches `www/`, auto-seeds a built-in EnvStackUI landing page (`www/index.php`), lets you link external project folders outside `www/`, auto-detects `/public`, generates Nginx & Apache configs, issues trusted local TLS certificates via **EnvStackUI Local Dev CA**, and supports both Windows `hosts` sync and one-click **Wildcard DNS (`*.test` + subdomains via Windows NRPT)** with non-blocking On-Demand UAC.
 - **Live Mailpit Email Popup** — Shows a native bottom-right desktop notification whenever a local email arrives (even when minimized to System Tray); click the popup to open the message directly in **Mailpit Web UI**.
 - **Online Package Manager & Custom Importer** — Browse and install official builds of **PHP** (`windows.php.net`), **Node.js**, **Python** (`astral-sh/python-build-standalone`), **Nginx**, **Apache**, **MariaDB**, **Go**, **Mailpit**, **Composer**, and **Adminer** with live download speed, ETA, file sizes, smart filters, and uninstall support — or import any `.zip` / `.tar.gz` archive from a URL or local file.
 - **Hybrid Binary Linking** — Reuse existing toolchains on disk (e.g. `C:\AppPath` or other portable folders) without duplicating files, and unlink anytime.
@@ -51,7 +52,7 @@ Fast, clean, zero-nag, 100% portable `.exe` — manage **Nginx**, **Apache**, **
 
 ## Quick Start
 
-1. Download **`EnvStackUI-v0.1.0-win-x64-portable.exe`** from [**GitHub Releases**](https://github.com/aozora-kenzu/EnvStackUI/releases/latest).
+1. Download **`EnvStackUI-v1.0.1-win-x64-portable.exe`** (or **`EnvStackUI-v1.0.1-win-x64-portable.zip`**) from [**GitHub Releases**](https://github.com/aozora-kenzu/EnvStackUI/releases/latest).
 2. Place it in any portable folder (for example `D:\Apps\EnvStackUI\EnvStackUI.exe`) and run it — no installation required.
 3. On first launch, EnvStackUI automatically creates its portable directory layout alongside the executable:
 
