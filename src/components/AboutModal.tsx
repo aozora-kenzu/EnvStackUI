@@ -46,7 +46,12 @@ export function AboutModal({
   const [lastChecked, setLastChecked] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadPct, setDownloadPct] = useState<number | null>(null);
-  const [downloadedPath, setDownloadedPath] = useState<string | null>(null);
+  const [updateStage, setUpdateStage] = useState<'downloading' | 'verifying' | 'installing'>(
+    'downloading',
+  );
+  const [downloadedBytes, setDownloadedBytes] = useState(0);
+  const [totalBytes, setTotalBytes] = useState<number | null>(null);
+  const [speedBps, setSpeedBps] = useState(0);
   const [downloadErr, setDownloadErr] = useState<string | null>(null);
 
   const nowTime = () => {
@@ -71,6 +76,8 @@ export function AboutModal({
         release_url: `https://github.com/${githubRepo}/releases`,
         asset_name: null,
         asset_url: null,
+        asset_size: null,
+        checksum_url: null,
         published_at: null,
         error: String(e),
       });
@@ -82,8 +89,8 @@ export function AboutModal({
 
   useEffect(() => {
     if (!open) return;
-    setDownloadedPath(null);
     setDownloadErr(null);
+    setDownloadPct(null);
     if (autoCheckUpdates) {
       void runCheck();
     } else if (cachedUpdate) {
@@ -93,15 +100,25 @@ export function AboutModal({
 
   useEffect(() => {
     if (!open) return;
-    const unlistenPromise = listen<{ downloaded: number; total: number | null }>(
-      'update-download-progress',
-      (ev) => {
-        const { downloaded, total } = ev.payload;
-        if (total && total > 0) {
-          setDownloadPct(Math.min(100, Math.round((downloaded / total) * 100)));
-        }
-      },
-    );
+    const unlistenPromise = listen<{
+      stage?: string;
+      downloaded: number;
+      total: number | null;
+      speed_bps?: number;
+    }>('update-download-progress', (ev) => {
+      const { stage, downloaded, total, speed_bps } = ev.payload;
+      if (stage === 'verifying' || stage === 'installing' || stage === 'downloading') {
+        setUpdateStage(stage);
+      }
+      setDownloadedBytes(downloaded);
+      setTotalBytes(total);
+      setSpeedBps(speed_bps ?? 0);
+      if (stage === 'installing') {
+        setDownloadPct(100);
+      } else if (total && total > 0) {
+        setDownloadPct(Math.min(100, Math.round((downloaded / total) * 100)));
+      }
+    });
     return () => {
       void unlistenPromise.then((fn) => fn());
     };
@@ -109,17 +126,23 @@ export function AboutModal({
 
   if (!open) return null;
 
-  const handleDownload = async () => {
+  const handleInstallAndRestart = async () => {
     if (!result?.asset_url || !result.asset_name) return;
     setDownloading(true);
+    setUpdateStage('downloading');
     setDownloadPct(0);
+    setDownloadedBytes(0);
+    setTotalBytes(result.asset_size ?? null);
+    setSpeedBps(0);
     setDownloadErr(null);
     try {
-      const saved = await api.downloadUpdate(result.asset_url, result.asset_name);
-      setDownloadedPath(saved);
+      await api.installAndRestartUpdate(
+        result.asset_url,
+        result.asset_name,
+        result.checksum_url,
+      );
     } catch (e) {
       setDownloadErr(String(e));
-    } finally {
       setDownloading(false);
     }
   };
@@ -263,13 +286,46 @@ export function AboutModal({
                   </pre>
                 )}
 
-                {downloadedPath && (
-                  <div className="text-[11px] font-mono" style={{ color: 'var(--green)' }}>
-                    {format(t.about.downloadedTo, { path: downloadedPath })}
+                {downloading && (
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between text-[10px] font-mono">
+                      <span style={{ color: 'var(--accent)' }}>
+                        {updateStage === 'verifying'
+                          ? t.about.verifyingUpdate
+                          : updateStage === 'installing'
+                            ? t.about.installingUpdate
+                            : `${t.about.downloadingUpdate}${downloadPct !== null ? ` ${downloadPct}%` : ''}`}
+                      </span>
+                      {updateStage === 'downloading' && downloadedBytes > 0 && (
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          {(downloadedBytes / (1024 * 1024)).toFixed(1)}
+                          {totalBytes ? ` / ${(totalBytes / (1024 * 1024)).toFixed(1)} MB` : ' MB'}
+                          {speedBps >= 1024 * 1024
+                            ? ` · ${(speedBps / (1024 * 1024)).toFixed(1)} MB/s`
+                            : speedBps >= 1024
+                              ? ` · ${(speedBps / 1024).toFixed(0)} KB/s`
+                              : ''}
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      className="h-1.5 w-full rounded overflow-hidden"
+                      style={{ background: 'var(--bg-input)' }}
+                    >
+                      <div
+                        className="h-full transition-all"
+                        style={{
+                          width: `${downloadPct ?? 35}%`,
+                          background:
+                            updateStage === 'installing' ? 'var(--green)' : 'var(--accent)',
+                        }}
+                      />
+                    </div>
                   </div>
                 )}
+
                 {downloadErr && (
-                  <div className="text-[11px] font-mono" style={{ color: 'var(--red)' }}>
+                  <div className="text-[11px] font-mono selectable" style={{ color: 'var(--red)' }}>
                     {downloadErr}
                   </div>
                 )}
@@ -279,7 +335,7 @@ export function AboutModal({
                     <button
                       type="button"
                       disabled={downloading}
-                      onClick={handleDownload}
+                      onClick={handleInstallAndRestart}
                       className="ui-btn ui-btn-primary text-[11px]"
                     >
                       {downloading ? (
@@ -289,8 +345,12 @@ export function AboutModal({
                       )}
                       <span>
                         {downloading
-                          ? `${t.about.downloadingUpdate}${downloadPct !== null ? ` (${downloadPct}%)` : ''}`
-                          : t.about.downloadUpdate}
+                          ? updateStage === 'verifying'
+                            ? t.about.verifyingUpdate
+                            : updateStage === 'installing'
+                              ? t.about.installingUpdate
+                              : `${t.about.downloadingUpdate}${downloadPct !== null ? ` (${downloadPct}%)` : ''}`
+                          : t.about.updateAndRestart}
                       </span>
                     </button>
                   )}

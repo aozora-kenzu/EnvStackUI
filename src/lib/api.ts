@@ -85,8 +85,16 @@ export const api = {
   clearLog: (name: string) => invoke<void>('clear_log', { name }),
 
   checkForUpdates: () => invoke<UpdateCheckResult>('check_for_updates'),
-  downloadUpdate: (assetUrl: string, assetName: string) =>
-    invoke<string>('download_update', { assetUrl, assetName }),
+  installAndRestartUpdate: (
+    assetUrl: string,
+    assetName: string,
+    checksumUrl?: string | null,
+  ) =>
+    invoke<void>('install_and_restart_update', {
+      assetUrl,
+      assetName,
+      checksumUrl: checksumUrl ?? null,
+    }),
 
   getLatestMailpitNotification: () =>
     invoke<MailpitNotification | null>('get_latest_mailpit_notification'),

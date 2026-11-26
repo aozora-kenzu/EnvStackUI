@@ -1149,7 +1149,7 @@ fn image_name_for_pid(pid: u32) -> Option<String> {
     }
 }
 
-fn is_pid_alive(pid: u32) -> bool {
+pub fn is_pid_alive(pid: u32) -> bool {
     let out = Command::new("tasklist")
         .args(["/FI", &format!("PID eq {pid}"), "/NH"])
         .creation_flags(CREATE_NO_WINDOW)

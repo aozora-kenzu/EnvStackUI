@@ -217,6 +217,8 @@ export interface UpdateCheckResult {
   release_url: string;
   asset_name: string | null;
   asset_url: string | null;
+  asset_size: number | null;
+  checksum_url: string | null;
   published_at: string | null;
   error: string | null;
 }

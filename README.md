@@ -19,6 +19,7 @@ Fast, clean, zero-nag, 100% portable `.exe` — manage **Nginx**, **Apache**, **
 ## Key Features
 
 - **100% Portable & Zero Nag** — Single standalone `.exe` (~16 MB). No installer, no license popups, no background bloat, no OS pollution.
+- **1-Click Self-Update** — Built-in **Update & Restart** replaces the executable in-place with automatic PE & SHA-256 checksum verification and rollback safety.
 - **Core Local Services** — Start, stop, restart, restart all, and switch versions for **Apache** (default ports `80 / 443`, `LogFormat` + `mod_php` / Windows FastCGI), **Nginx** (ports `8080 / 8443`), **PHP FastCGI** (auto-respawn supervisor + TS/NTS detection), **MariaDB / MySQL** (auto-initialized `data/` + graceful shutdown), and **Mailpit** (SMTP + Web UI). Includes pre-start config syntax validation (`httpd -t` / `nginx -t`) and port-conflict process diagnostics.
 - **One-Click PHP Extensions & Xdebug** — Toggle PHP extensions (`gd`, `intl`, `zip`, `curl`, `xdebug`, etc.) inside `etc/php/php.ini` cleanly without manual editing.
 - **Auto Virtual Hosts, Linked Projects & Local HTTPS (`*.test`)** — Watches `www/`, auto-seeds a built-in EnvStackUI landing page (`www/index.php`), lets you link external project folders outside `www/`, auto-detects `/public`, generates Nginx & Apache configs, issues trusted local TLS certificates via **EnvStackUI Local Dev CA**, and supports both Windows `hosts` sync and one-click **Wildcard DNS (`*.test` + subdomains via Windows NRPT)** with non-blocking On-Demand UAC.
@@ -52,7 +53,7 @@ Fast, clean, zero-nag, 100% portable `.exe` — manage **Nginx**, **Apache**, **
 
 ## Quick Start
 
-1. Download **`EnvStackUI-v1.0.1-win-x64-portable.exe`** (or **`EnvStackUI-v1.0.1-win-x64-portable.zip`**) from [**GitHub Releases**](https://github.com/aozora-kenzu/EnvStackUI/releases/latest).
+1. Download **`EnvStackUI-v1.0.2-win-x64-portable.exe`** (or **`EnvStackUI-v1.0.2-win-x64-portable.zip`**) from [**GitHub Releases**](https://github.com/aozora-kenzu/EnvStackUI/releases/latest).
 2. Place it in any portable folder (for example `D:\Apps\EnvStackUI\EnvStackUI.exe`) and run it — no installation required.
 3. On first launch, EnvStackUI automatically creates its portable directory layout alongside the executable:
 

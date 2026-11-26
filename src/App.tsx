@@ -49,6 +49,7 @@ export function App() {
   const [syncingPath, setSyncingPath] = useState(false);
   const [toast, setToast] = useState<{ msg: string; kind: 'ok' | 'err' | 'info' } | null>(null);
   const [cachedUpdate, setCachedUpdate] = useState<UpdateCheckResult | null>(null);
+  const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
   const [mailpitUnread, setMailpitUnread] = useState(0);
   const [installingIds, setInstallingIds] = useState<string[]>([]);
   const [progressMap, setProgressMap] = useState<Record<string, DownloadProgress>>({});
@@ -500,6 +501,47 @@ export function App() {
           onOpenTerminal={() => handleOpenTerminal()}
           onOpenAbout={() => setAboutOpen(true)}
         />
+
+        {cachedUpdate?.status === 'update_available' && !updateBannerDismissed && (
+          <div
+            className="h-8 px-4 border-b flex items-center justify-between gap-3 text-[11px] shrink-0"
+            style={{
+              background: 'var(--amber-soft)',
+              borderColor: 'var(--border)',
+              color: 'var(--text-primary)',
+            }}
+          >
+            <div className="flex items-center gap-2 font-mono truncate">
+              <span
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ background: 'var(--amber)' }}
+              />
+              <span className="truncate">
+                {fmt(dict.about.bannerAvailable, {
+                  version: cachedUpdate.latest_version ?? '',
+                })}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setAboutOpen(true)}
+                className="ui-btn ui-btn-primary text-[10px] py-0.5 px-2"
+              >
+                {dict.about.bannerAction}
+              </button>
+              <button
+                type="button"
+                onClick={() => setUpdateBannerDismissed(true)}
+                className="p-0.5 rounded cursor-pointer hover:bg-[var(--bg-hover)]"
+                style={{ color: 'var(--text-muted)' }}
+                aria-label="Dismiss"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 flex min-h-0 overflow-hidden">
           <Sidebar

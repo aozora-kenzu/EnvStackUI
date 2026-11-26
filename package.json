@@ -1,7 +1,7 @@
 {
   "name": "envstack-ui",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Portable Windows local web development environment and multi-runtime manager.",
   "type": "module",
   "scripts": {

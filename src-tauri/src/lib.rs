@@ -940,16 +940,68 @@ async fn check_for_updates(state: State<'_, AppState>) -> Result<UpdateCheckResu
 }
 
 #[tauri::command]
-async fn download_update(
+async fn install_and_restart_update(
     asset_url: String,
     asset_name: String,
+    checksum_url: Option<String>,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<String, String> {
+) -> Result<(), String> {
+    if cfg!(debug_assertions) {
+        return Err("Self-update is only available in portable release builds.".into());
+    }
+
     let paths = state.paths.clone();
-    updater::download_update(&paths, &asset_url, &asset_name, Some(&app))
-        .await
-        .map_err(|e| format!("{e:#}"))
+    let staged_exe = updater::download_and_stage_update(
+        &paths,
+        &asset_url,
+        &asset_name,
+        checksum_url.as_deref(),
+        Some(&app),
+    )
+    .await
+    .map_err(|e| format!("{e:#}"))?;
+
+    let _ = app.emit(
+        "update-download-progress",
+        serde_json::json!({
+            "stage": "installing",
+            "downloaded": 100,
+            "total": 100,
+            "speed_bps": 0,
+        }),
+    );
+
+    state.dns.stop();
+    let services = state.services.clone();
+    let paths_stop = paths.clone();
+    let app_stop = app.clone();
+    tokio::task::spawn_blocking(move || {
+        services.stop_all(&paths_stop, Some(&app_stop));
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let old_exe = updater::swap_executable_files(&current_exe, &staged_exe)
+        .map_err(|e| format!("{e:#}"))?;
+
+    let spawn_res = Command::new(&current_exe)
+        .args(["--wait-pid", &std::process::id().to_string()])
+        .spawn();
+
+    if let Err(err) = spawn_res {
+        updater::rollback_executable_swap(&current_exe, &old_exe);
+        return Err(format!("Failed to launch updated binary: {err}"));
+    }
+
+    let app_exit = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+        app_exit.exit(0);
+    });
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -1069,6 +1121,10 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+pub fn handle_prelaunch_wait() {
+    updater::handle_prelaunch_wait();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1087,6 +1143,7 @@ pub fn run() {
             paths
                 .ensure_dirs()
                 .expect("Failed to create portable directories");
+            updater::cleanup_old_update_files(&paths);
             services::ServiceManager::cleanup_orphan_pids(&paths);
             let _ = ssl::ensure_root_ca(&paths.etc_ssl);
 
@@ -1213,7 +1270,7 @@ pub fn run() {
             read_log_tail,
             clear_log,
             check_for_updates,
-            download_update,
+            install_and_restart_update,
             get_latest_mailpit_notification,
             hide_mailpit_toast,
         ])
