@@ -8,7 +8,7 @@ Fast, clean, zero-nag, 100% portable `.exe` — manage **Nginx**, **Apache**, **
 
 [![Latest Release](https://img.shields.io/github/v/release/aozora-kenzu/EnvStackUI?style=flat-square&color=74ade8)](https://github.com/aozora-kenzu/EnvStackUI/releases/latest)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-4c6fd8?style=flat-square)](https://github.com/aozora-kenzu/EnvStackUI/releases/latest)
-[![License](https://img.shields.io/badge/License-Freeware-a1c181?style=flat-square)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-a1c181?style=flat-square)](LICENSE)
 
 [**Download Portable `.exe` (Latest Release)**](https://github.com/aozora-kenzu/EnvStackUI/releases/latest)
 
@@ -78,6 +78,40 @@ EnvStackUI/
 
 - **OS**: Windows 10 / Windows 11 (64-bit)
 - **Runtime**: Microsoft Edge WebView2 Runtime (pre-installed on Windows 10/11)
+
+---
+
+## Build from Source
+
+### Prerequisites
+
+- **OS**: Windows 10 / Windows 11 (64-bit)
+- **Node.js**: 20+
+- **Rust**: Stable toolchain with MSVC Build Tools (`x86_64-pc-windows-msvc`)
+- **WebView2**: Microsoft Edge WebView2 Runtime
+
+### Commands
+
+```bash
+git clone https://github.com/aozora-kenzu/EnvStackUI.git
+cd EnvStackUI
+npm install
+
+# Run in development mode
+npm run tauri dev
+
+# Build standalone portable .exe
+npm run build:portable
+
+# Run Rust unit tests
+cd src-tauri && cargo test
+```
+
+---
+
+## License
+
+EnvStackUI is open-source software licensed under the [MIT License](LICENSE).
 
 ---
 

@@ -3,6 +3,11 @@
   "private": true,
   "version": "1.0.2",
   "description": "Portable Windows local web development environment and multi-runtime manager.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aozora-kenzu/EnvStackUI.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

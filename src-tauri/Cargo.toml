@@ -3,6 +3,8 @@ name = "envstack-ui"
 version = "1.0.2"
 description = "Portable Windows local web development environment and multi-runtime manager"
 authors = ["AKZ Team"]
+license = "MIT"
+repository = "https://github.com/aozora-kenzu/EnvStackUI"
 publish = false
 edition = "2021"
 

@@ -428,7 +428,7 @@ export function AboutModal({
             </button>
 
             <span style={{ color: 'var(--text-muted)' }}>{t.about.fieldLicense}</span>
-            <span>Freeware — All Rights Reserved (Copyright © 2026 {DEV_NAME})</span>
+            <span>MIT License (Copyright © 2026 {DEV_NAME})</span>
 
             <span style={{ color: 'var(--text-muted)' }}>{t.about.fieldBuiltWith}</span>
             <span>Rust + Tauri v2 + React TypeScript</span>
