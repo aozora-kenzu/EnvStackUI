@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-28
+
+### Added
+- **Per-Project PHP Version Pinning**: Pin a specific PHP version per site in the **Sites** tab (persisted via `.envstackrc` + `envstack.json`), with isolated `php-cgi` FastCGI workers, per-version `.ini` configs, Apache `mod_proxy_fcgi` routing, and matching Portable Terminal `PATH`.
+- **1-Click Create Database**: Dedicated **Create Database** modal accessible from **Services** and **Sites** for MariaDB/MySQL and PostgreSQL with strict identifier validation.
+- **PostgreSQL & Redis Support**: Native portable lifecycle management, default port config (`5432` / `6379`), data/config initialization, graceful shutdown, log viewing (`postgres-error.log` / `redis.log`), and online package catalog installers.
+- **Built-in `envstack` CLI Mode & MCP Server**: Manage sites, PHP pins, logs, and databases via CLI (`status`, `sites`, `link`, `unlink`, `pin`, `logs`, `db`), or connect AI coding agents via `envstack-ui.exe mcp` over stdio JSON-RPC.
+- **Open-Source Infrastructure & CI/CD**: Added GitHub Actions CI & automated Windows portable Release workflows, `CONTRIBUTING.md`, issue/PR templates, `.gitattributes`, and `.editorconfig`.
+
 ### Changed
 - Transitioned EnvStackUI to Open-Source under the **MIT License**.
 

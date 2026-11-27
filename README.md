@@ -55,7 +55,7 @@ Fast, clean, zero-nag, 100% portable `.exe` — manage **Nginx**, **Apache**, **
 
 ## Quick Start
 
-1. Download **`EnvStackUI-v1.0.2-win-x64-portable.exe`** (or **`EnvStackUI-v1.0.2-win-x64-portable.zip`**) from [**GitHub Releases**](https://github.com/aozora-kenzu/EnvStackUI/releases/latest).
+1. Download **`EnvStackUI-v1.1.0-win-x64-portable.exe`** (or **`EnvStackUI-v1.1.0-win-x64-portable.zip`**) from [**GitHub Releases**](https://github.com/aozora-kenzu/EnvStackUI/releases/latest).
 2. Place it in any portable folder (for example `D:\Apps\EnvStackUI\EnvStackUI.exe`) and run it — no installation required.
 3. On first launch, EnvStackUI automatically creates its portable directory layout alongside the executable:
 

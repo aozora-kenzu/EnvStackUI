@@ -1,6 +1,6 @@
 [package]
 name = "envstack-ui"
-version = "1.0.2"
+version = "1.1.0"
 description = "Portable Windows local web development environment and multi-runtime manager"
 authors = ["AKZ Team"]
 license = "MIT"
