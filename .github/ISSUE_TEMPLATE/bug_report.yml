@@ -1,0 +1,45 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in EnvStackUI
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: input
+    id: app_version
+    attributes:
+      label: EnvStackUI Version
+      description: e.g., v1.0.2 (shown in the status bar or About modal)
+      placeholder: "v1.0.2"
+    validations:
+      required: true
+  - type: input
+    id: os_version
+    attributes:
+      label: Windows Version
+      description: e.g., Windows 11 24H2 x64
+      placeholder: "Windows 11 x64"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Clear description of the bug and what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Numbered steps to trigger the issue.
+      placeholder: |
+        1. Open Services tab
+        2. Click Start on Apache
+        3. See error...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Log Output (optional)
+      description: Paste any relevant lines from the Logs tab (envstack.log, apache-error.log, nginx-error.log, etc.).
+      render: text

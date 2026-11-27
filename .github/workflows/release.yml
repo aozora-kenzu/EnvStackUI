@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.0.3)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    name: Build & Publish Portable Release (Windows x64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Setup Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run Rust unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build portable executable
+        run: npm run build:portable
+
+      - name: Package release assets and checksums
+        shell: pwsh
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          $tag = if ($env:GITHUB_REF_NAME -match '^v') { $env:GITHUB_REF_NAME } else { $env:INPUT_TAG }
+          if ([string]::IsNullOrWhiteSpace($tag)) { throw "Missing release tag" }
+
+          $releaseDir = "release-assets"
+          $zipStage = Join-Path $releaseDir "zip-stage"
+          New-Item -ItemType Directory -Force -Path $zipStage | Out-Null
+
+          $exeSrc = "src-tauri\target\release\envstack-ui.exe"
+          if (-not (Test-Path $exeSrc)) { throw "Built executable not found: $exeSrc" }
+
+          $exeName = "EnvStackUI-$tag-win-x64-portable.exe"
+          $zipName = "EnvStackUI-$tag-win-x64-portable.zip"
+          $exeDest = Join-Path $releaseDir $exeName
+          $zipDest = Join-Path $releaseDir $zipName
+
+          Copy-Item -Force $exeSrc $exeDest
+          Copy-Item -Force $exeSrc (Join-Path $zipStage "envstack-ui.exe")
+          Copy-Item -Force "README.md" (Join-Path $zipStage "README.md")
+          Copy-Item -Force "LICENSE" (Join-Path $zipStage "LICENSE")
+
+          Compress-Archive -Force -Path (Join-Path $zipStage "*") -DestinationPath $zipDest
+
+          $hExe = (Get-FileHash -Algorithm SHA256 $exeDest).Hash.ToLower()
+          $hZip = (Get-FileHash -Algorithm SHA256 $zipDest).Hash.ToLower()
+          $checksums = "$hExe  $exeName`n$hZip  $zipName`n"
+          [System.IO.File]::WriteAllText((Join-Path $releaseDir "checksums.txt"), $checksums, [System.Text.UTF8Encoding]::new($false))
+
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: EnvStackUI ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          files: |
+            release-assets/EnvStackUI-*.exe
+            release-assets/EnvStackUI-*.zip
+            release-assets/checksums.txt
