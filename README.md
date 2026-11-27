@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="src-tauri/icons/128x128.png" alt="EnvStackUI Icon" width="88" height="88" />
+
 # EnvStackUI
 
 **Portable Local Web Stack & Multi-Runtime Manager for Windows**
@@ -7,6 +9,7 @@
 Fast, clean, zero-nag, 100% portable `.exe` — manage **Nginx**, **Apache**, **PHP**, **MariaDB / MySQL**, **Mailpit**, local HTTPS virtual hosts, and multi-runtime toolchains from one sleek desktop workspace.
 
 [![Latest Release](https://img.shields.io/github/v/release/aozora-kenzu/EnvStackUI?style=flat-square&color=74ade8)](https://github.com/aozora-kenzu/EnvStackUI/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/aozora-kenzu/EnvStackUI/total?style=flat-square&color=e5c07b)](https://github.com/aozora-kenzu/EnvStackUI/releases)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-4c6fd8?style=flat-square)](https://github.com/aozora-kenzu/EnvStackUI/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-a1c181?style=flat-square)](LICENSE)
 
