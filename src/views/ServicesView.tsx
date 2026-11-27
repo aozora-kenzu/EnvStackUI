@@ -6,6 +6,7 @@ import {
   Loader2,
   Package,
   Play,
+  PlusCircle,
   RefreshCw,
   RotateCw,
   SlidersHorizontal,
@@ -30,6 +31,7 @@ interface ServicesViewProps {
   onRescan: () => void;
   onOpenAdminer: () => void;
   onLaunchDbClient: () => void;
+  onOpenCreateDb: (engine: 'mysql' | 'postgres') => void;
   onOpenPhpExtensions: () => void;
   onOpenUrl: (url: string) => void;
 }
@@ -49,6 +51,7 @@ export function ServicesView({
   onRescan,
   onOpenAdminer,
   onLaunchDbClient,
+  onOpenCreateDb,
   onOpenPhpExtensions,
   onOpenUrl,
 }: ServicesViewProps) {
@@ -347,6 +350,15 @@ export function ServicesView({
 
                   {svc.id === 'mysql' && (
                     <>
+                      <button
+                        type="button"
+                        onClick={() => onOpenCreateDb('mysql')}
+                        title={t.services.createDatabase}
+                        aria-label={t.services.createDatabase}
+                        className="ui-btn w-7 h-7 p-0 flex items-center justify-center shrink-0"
+                      >
+                        <PlusCircle size={13} style={{ color: 'var(--green)' }} />
+                      </button>
                       <button
                         type="button"
                         onClick={onOpenAdminer}

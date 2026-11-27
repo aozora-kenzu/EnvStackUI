@@ -44,6 +44,11 @@ export const api = {
   regenerateRootCa: () => invoke<AppBootstrap>('regenerate_root_ca'),
   addLinkedSite: (path: string) => invoke<AppBootstrap>('add_linked_site', { path }),
   removeLinkedSite: (path: string) => invoke<AppBootstrap>('remove_linked_site', { path }),
+  setSitePhpVersion: (domain: string, phpVersionId: string | null) =>
+    invoke<AppBootstrap>('set_site_php_version', { domain, phpVersionId }),
+  listDatabases: (engine: string) => invoke<string[]>('list_databases', { engine }),
+  createDatabase: (engine: string, name: string) =>
+    invoke<string[]>('create_database', { engine, name }),
   getPhpExtensions: () => invoke<PhpExtensionsPayload>('get_php_extensions'),
   togglePhpExtension: (name: string, enabled: boolean) =>
     invoke<PhpExtensionsPayload>('toggle_php_extension', { name, enabled }),

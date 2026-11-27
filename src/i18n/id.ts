@@ -98,6 +98,7 @@ export const id: TranslationKeys = {
     openLocalhost: 'Buka Localhost',
     openAdminer: 'Buka Adminer',
     launchDbClient: 'Buka Klien DB',
+    createDatabase: 'Buat Database',
     phpExtensions: 'Ekstensi PHP & Xdebug',
     sourcePortable: 'portabel',
     sourceExternal: 'eksternal',
@@ -147,6 +148,9 @@ export const id: TranslationKeys = {
     colProject: 'Proyek',
     colDomain: 'Domain & URL',
     colFramework: 'Stack / DocRoot',
+    colPhp: 'PHP',
+    phpGlobalDefault: 'Global ({version})',
+    quickCreateDb: 'Buat Database',
     colSsl: 'HTTPS',
     colActions: 'Aksi',
     sslReady: 'Sertifikat Siap',
@@ -304,6 +308,16 @@ export const id: TranslationKeys = {
     close: 'Tutup',
   },
 
+  createDb: {
+    title: 'Buat Database Baru',
+    nameLabel: 'Nama Database',
+    namePlaceholder: 'mis. my_app_db',
+    createBtn: 'Buat',
+    existingTitle: 'Database Tersedia',
+    loading: 'Memuat daftar database...',
+    empty: 'Belum ada database pengguna.',
+  },
+
   toasts: {
     rescanDone: 'Pemindaian selesai — {bins} binary & {sites} situs ditemukan',
     logsRefreshed: '{name} disegarkan ({count} baris)',
@@ -321,6 +335,8 @@ export const id: TranslationKeys = {
     hostsSynced: 'File hosts Windows disinkronkan',
     siteLinked: 'Proyek eksternal ditautkan: {path}',
     siteUnlinked: 'Tautan proyek diputus: {path}',
+    sitePhpUpdated: 'Versi PHP diperbarui untuk {domain}',
+    dbCreated: 'Database {name} siap digunakan ({engine})',
     wildcardDnsEnabled: 'Wildcard DNS (*.{tld}) diaktifkan',
     wildcardDnsDisabled: 'Wildcard DNS dinonaktifkan',
     extensionUpdated: '{name} {state} — restart PHP/Apache untuk menerapkan',

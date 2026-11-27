@@ -214,9 +214,18 @@ impl ServiceManager {
             .ok_or_else(|| anyhow!("No binary installed or selected for '{id}'"))?;
 
         let result = match id {
-            "nginx" => self.start_nginx(bin, paths, config, inventory),
-            "apache" => self.start_apache(bin, paths, config, inventory),
-            "php" => self.start_php(bin, paths, config, app.cloned()),
+            "nginx" => {
+                self.sync_pinned_php_workers(paths, config, inventory, app)?;
+                self.start_nginx(bin, paths, config, inventory)
+            }
+            "apache" => {
+                self.sync_pinned_php_workers(paths, config, inventory, app)?;
+                self.start_apache(bin, paths, config, inventory)
+            }
+            "php" => {
+                self.start_php(bin, paths, config, app.cloned())?;
+                self.sync_pinned_php_workers(paths, config, inventory, app)
+            }
             "mysql" => self.start_mysql(bin, paths, config),
             "mailpit" => self.start_mailpit(bin, paths, config),
             _ => Err(anyhow!("Unsupported service {id}")),
@@ -326,6 +335,10 @@ impl ServiceManager {
             }
         }
 
+        if id == "php" {
+            self.stop_all_pinned_php_workers();
+        }
+
         self.errors.lock().unwrap().remove(id);
         append_app_log(&paths.logs, app, "INFO", &format!("Stopped service '{id}'"));
         if let Some(h) = app {
@@ -334,10 +347,32 @@ impl ServiceManager {
         Ok(())
     }
 
+    fn stop_all_pinned_php_workers(&self) {
+        let pinned_keys: Vec<String> = {
+            let procs = self.procs.lock().unwrap();
+            procs
+                .keys()
+                .filter(|k| k.starts_with("php_pin:"))
+                .cloned()
+                .collect()
+        };
+        for key in pinned_keys {
+            if let Some(mut proc_info) = self.procs.lock().unwrap().remove(&key) {
+                proc_info.desired_running = false;
+                if let Some(mut child) = proc_info.child.take() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                kill_process_tree(proc_info.pid);
+            }
+        }
+    }
+
     pub fn stop_all(&self, paths: &PortablePaths, app: Option<&AppHandle>) {
         for id in ALL_SERVICES {
             let _ = self.stop_service(id, paths, app);
         }
+        self.stop_all_pinned_php_workers();
     }
 
     fn start_nginx(
@@ -358,6 +393,7 @@ impl ServiceManager {
         let sites = vhosts::scan_sites(
             &www_root,
             config,
+            inventory,
             &paths.etc_ssl,
             &paths.root,
             (config.ports.nginx_http, config.ports.nginx_https),
@@ -438,6 +474,7 @@ impl ServiceManager {
         let sites = vhosts::scan_sites(
             &www_root,
             config,
+            inventory,
             &paths.etc_ssl,
             &paths.root,
             (config.ports.apache_http, config.ports.apache_https),
@@ -708,9 +745,37 @@ fn spawn_php_cgi(
         .with_context(|| format!("Failed to spawn {}", php_cgi.display()))
 }
 
+pub fn pinned_php_ini_filename(bin: &BinaryItem) -> String {
+    let raw = format!(
+        "{}-{}",
+        bin.version,
+        bin.variant.as_deref().unwrap_or("nts")
+    );
+    let sanitized: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    format!("php-{sanitized}.ini")
+}
+
 pub fn ensure_php_ini(php_dir: &Path, paths: &PortablePaths, config: &AppConfig) -> Result<PathBuf> {
+    ensure_php_ini_for_version(php_dir, paths, config, "php.ini")
+}
+
+pub fn ensure_php_ini_for_version(
+    php_dir: &Path,
+    paths: &PortablePaths,
+    config: &AppConfig,
+    file_name: &str,
+) -> Result<PathBuf> {
     fs::create_dir_all(&paths.etc_php)?;
-    let ini_path = paths.etc_php.join("php.ini");
+    let ini_path = paths.etc_php.join(file_name);
     let ext_dir = slash_path(&php_dir.join("ext"));
     let target_ext_line = format!("extension_dir = \"{ext_dir}\"");
     let target_smtp_line = format!("smtp_port = {}", config.ports.mailpit_smtp);
@@ -949,6 +1014,11 @@ fn write_apache_main_conf(
                 slash_path(&dll),
                 ini_dir
             ));
+            if !vhosts::resolve_pinned_php_ports(config, inventory).is_empty() {
+                php_module_block.push_str(
+                    "LoadModule proxy_module modules/mod_proxy.so\nLoadModule proxy_fcgi_module modules/mod_proxy_fcgi.so\nProxyTimeout 120\n",
+                );
+            }
         } else {
             php_module_block = "LoadModule proxy_module modules/mod_proxy.so\nLoadModule proxy_fcgi_module modules/mod_proxy_fcgi.so\n".to_string();
             fcgi_handler_block = format!(
@@ -1161,5 +1231,323 @@ pub fn is_pid_alive(pid: u32) -> bool {
             text.contains(&pid.to_string())
         }
         Err(_) => false,
+    }
+}
+
+impl ServiceManager {
+    pub fn sync_pinned_php_workers(
+        &self,
+        paths: &PortablePaths,
+        config: &AppConfig,
+        inventory: &Inventory,
+        app: Option<&AppHandle>,
+    ) -> Result<()> {
+        let pinned_ports = vhosts::resolve_pinned_php_ports(config, inventory);
+        let php_bins = inventory.binaries.get("php").map(Vec::as_slice).unwrap_or(&[]);
+
+        let mut desired_by_port: HashMap<u16, BinaryItem> = HashMap::new();
+        for (bin_id, port) in pinned_ports {
+            if let Some(bin) = php_bins.iter().find(|b| b.id == bin_id) {
+                desired_by_port.insert(port, bin.clone());
+            }
+        }
+
+        // Stop workers whose port is no longer pinned or whose binary changed
+        let existing_keys: Vec<(String, u16, Option<PathBuf>)> = {
+            let procs = self.procs.lock().unwrap();
+            procs
+                .iter()
+                .filter(|(k, _)| k.starts_with("php_pin:"))
+                .map(|(k, v)| (k.clone(), v.port, v.exe_path.clone()))
+                .collect()
+        };
+
+        for (key, port, exe_opt) in existing_keys {
+            let keep = desired_by_port
+                .get(&port)
+                .map(|bin| {
+                    let expected_cgi = Path::new(&bin.root_dir).join("php-cgi.exe");
+                    exe_opt.as_ref() == Some(&expected_cgi)
+                })
+                .unwrap_or(false);
+
+            if !keep {
+                if let Some(mut proc_info) = self.procs.lock().unwrap().remove(&key) {
+                    proc_info.desired_running = false;
+                    if let Some(mut child) = proc_info.child.take() {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                    }
+                    kill_process_tree(proc_info.pid);
+                }
+            }
+        }
+
+        // Start missing pinned php-cgi workers
+        for (port, bin) in desired_by_port {
+            let key = format!("php_pin:{port}");
+            let already_alive = {
+                let mut procs = self.procs.lock().unwrap();
+                procs
+                    .get_mut(&key)
+                    .map(|entry| {
+                        entry
+                            .child
+                            .as_mut()
+                            .map(|c| matches!(c.try_wait(), Ok(None)))
+                            .unwrap_or_else(|| entry.desired_running && is_pid_alive(entry.pid))
+                    })
+                    .unwrap_or(false)
+            };
+
+            if already_alive {
+                continue;
+            }
+
+            if !Self::is_port_free(port) {
+                return Err(Self::port_in_use_error(
+                    port,
+                    &format!("Pinned PHP ({})", bin.version),
+                ));
+            }
+
+            let php_dir = Path::new(&bin.root_dir);
+            let php_cgi = php_dir.join("php-cgi.exe");
+            if !php_cgi.is_file() {
+                return Err(anyhow!(
+                    "php-cgi.exe not found for pinned PHP {} in {}",
+                    bin.version,
+                    php_dir.display()
+                ));
+            }
+
+            let ini_name = pinned_php_ini_filename(&bin);
+            let ini_path = ensure_php_ini_for_version(php_dir, paths, config, &ini_name)?;
+            let bind_addr = format!("127.0.0.1:{port}");
+            let child = spawn_php_cgi(&php_cgi, php_dir, &bind_addr, &ini_path, &paths.logs)?;
+            let pid = child.id();
+
+            self.procs.lock().unwrap().insert(
+                key.clone(),
+                RunningProc {
+                    child: Some(child),
+                    pid,
+                    desired_running: true,
+                    exe_path: Some(php_cgi.clone()),
+                    port,
+                },
+            );
+
+            append_app_log(
+                &paths.logs,
+                app,
+                "INFO",
+                &format!("Started pinned PHP {} FastCGI worker on 127.0.0.1:{port}", bin.version),
+            );
+
+            let procs_ref = Arc::clone(&self.procs);
+            let php_cgi_owned = php_cgi;
+            let php_dir_owned = php_dir.to_path_buf();
+            let ini_owned = ini_path;
+            let logs_dir = paths.logs.clone();
+            let key_owned = key;
+
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                    let mut should_respawn = false;
+                    {
+                        let mut guard = procs_ref.lock().unwrap();
+                        let Some(entry) = guard.get_mut(&key_owned) else {
+                            break;
+                        };
+                        if !entry.desired_running {
+                            break;
+                        }
+                        if let Some(child) = entry.child.as_mut() {
+                            if let Ok(Some(_)) = child.try_wait() {
+                                should_respawn = true;
+                            }
+                        }
+                    }
+
+                    if should_respawn {
+                        match spawn_php_cgi(
+                            &php_cgi_owned,
+                            &php_dir_owned,
+                            &bind_addr,
+                            &ini_owned,
+                            &logs_dir,
+                        ) {
+                            Ok(new_child) => {
+                                let new_pid = new_child.id();
+                                let mut guard = procs_ref.lock().unwrap();
+                                if let Some(entry) = guard.get_mut(&key_owned) {
+                                    if entry.desired_running {
+                                        entry.pid = new_pid;
+                                        entry.child = Some(new_child);
+                                    } else {
+                                        kill_process_tree(new_pid);
+                                        break;
+                                    }
+                                } else {
+                                    kill_process_tree(new_pid);
+                                    break;
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                }
+            });
+        }
+
+        Ok(())
+    }
+}
+
+pub fn validate_db_name(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.len() > 63 {
+        return Err(anyhow!("Database name must be 1 to 63 characters."));
+    }
+    let mut chars = trimmed.chars();
+    let first = chars.next().unwrap();
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return Err(anyhow!(
+            "Database name must start with an ASCII letter or underscore."
+        ));
+    }
+    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(anyhow!(
+            "Database name may only contain letters, numbers, and underscores."
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn find_mysql_client_exe(config: &AppConfig, inventory: &Inventory) -> Result<PathBuf> {
+    let bin = get_active_binary(inventory, config, "mysql")
+        .ok_or_else(|| anyhow!("No MariaDB / MySQL binary is configured."))?;
+    let exe_parent = Path::new(&bin.exe_path)
+        .parent()
+        .unwrap_or_else(|| Path::new(&bin.bin_dir));
+    for name in ["mariadb.exe", "mysql.exe"] {
+        let candidate = exe_parent.join(name);
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+    Err(anyhow!(
+        "mariadb.exe or mysql.exe was not found next to {}",
+        bin.exe_path
+    ))
+}
+
+pub fn list_mysql_databases(config: &AppConfig, inventory: &Inventory) -> Result<Vec<String>> {
+    let client = find_mysql_client_exe(config, inventory)?;
+    let port_str = config.ports.mysql.to_string();
+    let out = Command::new(&client)
+        .args([
+            "-u",
+            "root",
+            "-P",
+            &port_str,
+            "--protocol=TCP",
+            "-N",
+            "-B",
+            "-e",
+            "SHOW DATABASES;",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .with_context(|| format!("Failed to execute {}", client.display()))?;
+
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(anyhow!(
+            "Could not connect to MariaDB / MySQL on port {port_str}: {stderr}"
+        ));
+    }
+
+    let mut list: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|s| {
+            !s.is_empty()
+                && !matches!(
+                    s.to_ascii_lowercase().as_str(),
+                    "information_schema" | "mysql" | "performance_schema" | "sys"
+                )
+        })
+        .map(String::from)
+        .collect();
+    list.sort_by_key(|a| a.to_lowercase());
+    Ok(list)
+}
+
+pub fn create_mysql_database(
+    name: &str,
+    config: &AppConfig,
+    inventory: &Inventory,
+) -> Result<Vec<String>> {
+    let safe_name = validate_db_name(name)?;
+    let client = find_mysql_client_exe(config, inventory)?;
+    let port_str = config.ports.mysql.to_string();
+    let sql = format!(
+        "CREATE DATABASE IF NOT EXISTS `{safe_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+    );
+
+    let out = Command::new(&client)
+        .args(["-u", "root", "-P", &port_str, "--protocol=TCP", "-e", &sql])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .with_context(|| format!("Failed to execute {}", client.display()))?;
+
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(anyhow!("Failed to create database '{safe_name}': {stderr}"));
+    }
+
+    list_mysql_databases(config, inventory)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_db_name_accepts_valid_and_rejects_unsafe() {
+        assert_eq!(validate_db_name("  my_app_db ").unwrap(), "my_app_db");
+        assert_eq!(validate_db_name("_internal2").unwrap(), "_internal2");
+
+        assert!(validate_db_name("").is_err());
+        assert!(validate_db_name("1starts_with_digit").is_err());
+        assert!(validate_db_name("bad-hyphen").is_err());
+        assert!(validate_db_name("bad; DROP TABLE users").is_err());
+        assert!(validate_db_name("quote`db").is_err());
+    }
+
+    #[test]
+    fn ensure_php_ini_for_version_writes_isolated_ini() {
+        let base = std::env::temp_dir().join(format!("envstack_ini_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let paths = PortablePaths::from_root(base.clone());
+        let php_dir = base.join("bin").join("php").join("php-8.2.28");
+        fs::create_dir_all(&php_dir).unwrap();
+
+        let cfg = AppConfig::default();
+        let ini_path =
+            ensure_php_ini_for_version(&php_dir, &paths, &cfg, "php-8.2.28-nts.ini").unwrap();
+        assert!(ini_path.is_file());
+        assert_eq!(
+            ini_path.file_name().and_then(|s| s.to_str()),
+            Some("php-8.2.28-nts.ini")
+        );
+        let content = fs::read_to_string(&ini_path).unwrap();
+        assert!(content.contains("extension_dir"));
+        assert!(content.contains("php-8.2.28/ext"));
+
+        let _ = fs::remove_dir_all(&base);
     }
 }

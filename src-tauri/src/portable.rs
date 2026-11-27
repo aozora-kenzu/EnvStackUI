@@ -64,6 +64,8 @@ pub struct AppConfig {
     pub default_site_seeded: bool,
     pub linked_sites: Vec<String>,
     pub wildcard_dns_enabled: bool,
+    #[serde(default)]
+    pub site_php_versions: HashMap<String, String>,
 }
 
 impl Default for AppConfig {
@@ -89,6 +91,7 @@ impl Default for AppConfig {
             default_site_seeded: false,
             linked_sites: Vec::new(),
             wildcard_dns_enabled: false,
+            site_php_versions: HashMap::new(),
         }
     }
 }

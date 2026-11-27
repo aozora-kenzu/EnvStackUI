@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   Code2,
+  Database,
   ExternalLink,
   FolderOpen,
   FolderPlus,
@@ -29,6 +30,8 @@ interface SitesViewProps {
   onRegenerateVhosts: () => void;
   onLinkSite: () => void;
   onUnlinkSite: (path: string) => void;
+  onSetSitePhp: (domain: string, phpVersionId: string | null) => void;
+  onOpenCreateDb: (suggestedName: string) => void;
   onEnableWildcardDns: () => void;
   onDisableWildcardDns: () => void;
   onOpenWww: () => void;
@@ -48,6 +51,8 @@ export function SitesView({
   onRegenerateVhosts,
   onLinkSite,
   onUnlinkSite,
+  onSetSitePhp,
+  onOpenCreateDb,
   onEnableWildcardDns,
   onDisableWildcardDns,
   onOpenWww,
@@ -58,6 +63,10 @@ export function SitesView({
   const { t, format } = useI18n();
   const [vhostModal, setVhostModal] = useState<VhostConfigs | null>(null);
   const [vhostTab, setVhostTab] = useState<'nginx' | 'apache'>('nginx');
+  const phpBins = bootstrap.inventory.binaries['php'] ?? [];
+  const globalPhpId = bootstrap.config.active_versions['php'] ?? '';
+  const globalPhpLabel =
+    phpBins.find((b) => b.id === globalPhpId)?.version ?? t.overview.noRuntime;
 
   const cleanTld = bootstrap.config.tld.trim().replace(/^\./, '') || 'test';
   const isLocalhostTld = cleanTld.toLowerCase() === 'localhost';
@@ -251,6 +260,7 @@ export function SitesView({
                 <th className="py-2 px-3 font-medium">{t.sites.colProject}</th>
                 <th className="py-2 px-3 font-medium">{t.sites.colDomain}</th>
                 <th className="py-2 px-3 font-medium">{t.sites.colFramework}</th>
+                <th className="py-2 px-3 font-medium">{t.sites.colPhp}</th>
                 <th className="py-2 px-3 font-medium">{t.sites.colSsl}</th>
                 <th className="py-2 px-3 font-medium text-right">{t.sites.colActions}</th>
               </tr>
@@ -266,6 +276,11 @@ export function SitesView({
                     return '';
                   }
                 })();
+                const suggestedDb =
+                  site.name
+                    .toLowerCase()
+                    .replace(/[^a-z0-9_]/g, '_')
+                    .replace(/^[^a-z_]+/, '') || 'app';
                 return (
                 <tr
                   key={site.domain}
@@ -323,6 +338,36 @@ export function SitesView({
                     </div>
                   </td>
                   <td className="py-2.5 px-3">
+                    {phpBins.length > 0 ? (
+                      <select
+                        value={site.php_version_id ?? ''}
+                        onChange={(e) =>
+                          onSetSitePhp(site.domain, e.target.value ? e.target.value : null)
+                        }
+                        title={
+                          site.php_version_label
+                            ? `FastCGI :${site.php_cgi_port}`
+                            : globalPhpLabel
+                        }
+                        className="ui-select font-mono text-[11px] py-0.5 px-1.5 max-w-[140px]"
+                      >
+                        <option value="">
+                          {format(t.sites.phpGlobalDefault, { version: globalPhpLabel })}
+                        </option>
+                        {phpBins.map((bin) => (
+                          <option key={bin.id} value={bin.id}>
+                            {bin.version}
+                            {bin.variant ? ` (${bin.variant})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="font-mono text-[10px]" style={{ color: 'var(--text-dim)' }}>
+                        -
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2.5 px-3">
                     <span
                       className="font-mono text-[10px] px-1.5 py-0.5 rounded"
                       style={{
@@ -354,6 +399,14 @@ export function SitesView({
                           HTTPS
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => onOpenCreateDb(suggestedDb)}
+                        title={t.sites.quickCreateDb}
+                        className="ui-btn p-1.5"
+                      >
+                        <Database size={12} style={{ color: 'var(--accent)' }} />
+                      </button>
                       <button
                         type="button"
                         onClick={() => onOpenFolder(site.path)}

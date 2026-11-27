@@ -96,6 +96,7 @@ export const en = {
     openLocalhost: 'Open Localhost',
     openAdminer: 'Open Adminer',
     launchDbClient: 'Open DB Client',
+    createDatabase: 'Create Database',
     phpExtensions: 'PHP Extensions & Xdebug',
     sourcePortable: 'portable',
     sourceExternal: 'external',
@@ -145,6 +146,9 @@ export const en = {
     colProject: 'Project',
     colDomain: 'Domain & URLs',
     colFramework: 'Stack / DocRoot',
+    colPhp: 'PHP',
+    phpGlobalDefault: 'Global ({version})',
+    quickCreateDb: 'Create Database',
     colSsl: 'HTTPS',
     colActions: 'Actions',
     sslReady: 'Cert Ready',
@@ -302,6 +306,16 @@ export const en = {
     close: 'Close',
   },
 
+  createDb: {
+    title: 'Create Database',
+    nameLabel: 'Database Name',
+    namePlaceholder: 'e.g. my_app_db',
+    createBtn: 'Create',
+    existingTitle: 'Existing Databases',
+    loading: 'Loading databases...',
+    empty: 'No user databases found yet.',
+  },
+
   toasts: {
     rescanDone: 'Rescan complete — {bins} binaries & {sites} sites detected',
     logsRefreshed: 'Refreshed {name} ({count} lines)',
@@ -319,6 +333,8 @@ export const en = {
     hostsSynced: 'Windows hosts file synchronized',
     siteLinked: 'Linked external project: {path}',
     siteUnlinked: 'Unlinked project: {path}',
+    sitePhpUpdated: 'Updated PHP version for {domain}',
+    dbCreated: 'Database {name} is ready ({engine})',
     wildcardDnsEnabled: 'Wildcard DNS (*.{tld}) enabled',
     wildcardDnsDisabled: 'Wildcard DNS disabled',
     extensionUpdated: '{name} {state} — restart PHP/Apache to apply',

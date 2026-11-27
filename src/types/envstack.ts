@@ -41,6 +41,7 @@ export interface AppConfig {
   default_site_seeded?: boolean;
   linked_sites?: string[];
   wildcard_dns_enabled?: boolean;
+  site_php_versions?: Record<string, string>;
 }
 
 export interface BinaryItem {
@@ -89,6 +90,9 @@ export interface SiteInfo {
   is_linked: boolean;
   http_url: string;
   https_url: string;
+  php_version_id: string | null;
+  php_version_label: string | null;
+  php_cgi_port: number;
 }
 
 export interface WildcardDnsStatus {

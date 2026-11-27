@@ -1,9 +1,10 @@
 use crate::portable::{run_elevated_powershell, slash_path, AppConfig, PortablePaths};
+use crate::scanner::{BinaryItem, Inventory};
 use crate::ssl;
 use anyhow::{Context, Result};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use tauri::{AppHandle, Emitter};
@@ -11,6 +12,7 @@ use tauri::{AppHandle, Emitter};
 const HOSTS_PATH: &str = r"C:\Windows\System32\drivers\etc\hosts";
 const MARKER_START: &str = "# >>> EnvStackUI Managed Hosts";
 const MARKER_END: &str = "# <<< EnvStackUI Managed Hosts";
+const RC_FILE_NAME: &str = ".envstackrc";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SiteInfo {
@@ -23,6 +25,9 @@ pub struct SiteInfo {
     pub is_linked: bool,
     pub http_url: String,
     pub https_url: String,
+    pub php_version_id: Option<String>,
+    pub php_version_label: Option<String>,
+    pub php_cgi_port: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +44,161 @@ pub struct VhostConfigs {
     pub domain: String,
     pub nginx_conf: String,
     pub apache_conf: String,
+}
+
+pub fn read_envstackrc_php(site_dir: &Path) -> Option<String> {
+    let raw = fs::read_to_string(site_dir.join(RC_FILE_NAME)).ok()?;
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trimmed.split_once('=') {
+            if k.trim().eq_ignore_ascii_case("php") {
+                let val = v.trim();
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn write_envstackrc_php(site_dir: &Path, version: Option<&str>) -> Result<()> {
+    let rc_path = site_dir.join(RC_FILE_NAME);
+    let existing = fs::read_to_string(&rc_path).unwrap_or_default();
+    let mut kept: Vec<String> = existing
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            if let Some((k, _)) = trimmed.split_once('=') {
+                !k.trim().eq_ignore_ascii_case("php")
+            } else {
+                !trimmed.is_empty()
+            }
+        })
+        .map(String::from)
+        .collect();
+
+    if let Some(ver) = version.map(str::trim).filter(|s| !s.is_empty()) {
+        kept.push(format!("php={ver}"));
+    }
+
+    if kept.is_empty() {
+        if rc_path.is_file() {
+            let _ = fs::remove_file(&rc_path);
+        }
+    } else {
+        let mut content = kept.join("\n");
+        content.push('\n');
+        fs::write(&rc_path, content)
+            .with_context(|| format!("Failed to write {}", rc_path.display()))?;
+    }
+    Ok(())
+}
+
+pub fn find_php_binary_for_pin<'a>(
+    pin: &str,
+    php_bins: &'a [BinaryItem],
+) -> Option<&'a BinaryItem> {
+    let needle = pin.trim();
+    if needle.is_empty() {
+        return None;
+    }
+    php_bins
+        .iter()
+        .find(|b| b.id.eq_ignore_ascii_case(needle))
+        .or_else(|| php_bins.iter().find(|b| b.version.eq_ignore_ascii_case(needle)))
+        .or_else(|| php_bins.iter().find(|b| b.name.eq_ignore_ascii_case(needle)))
+}
+
+pub fn resolve_pinned_php_ports(
+    config: &AppConfig,
+    inventory: &Inventory,
+) -> HashMap<String, u16> {
+    let php_bins = inventory
+        .binaries
+        .get("php")
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let global_id = config.active_versions.get("php").map(String::as_str);
+
+    let mut unique_ids: BTreeSet<String> = BTreeSet::new();
+    for raw_pin in config.site_php_versions.values() {
+        if let Some(bin) = find_php_binary_for_pin(raw_pin, php_bins) {
+            if Some(bin.id.as_str()) != global_id {
+                unique_ids.insert(bin.id.clone());
+            }
+        }
+    }
+
+    let mut map = HashMap::new();
+    let base_port = config.ports.php_cgi;
+    for (idx, bin_id) in unique_ids.into_iter().enumerate() {
+        if let Some(port) = base_port.checked_add((idx as u16) + 1) {
+            map.insert(bin_id, port);
+        }
+    }
+    map
+}
+
+pub fn sync_envstackrc_pins_to_config(
+    www_root: &Path,
+    config: &mut AppConfig,
+    inventory: &Inventory,
+) -> bool {
+    let php_bins = inventory
+        .binaries
+        .get("php")
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let tld = config.tld.trim().trim_start_matches('.');
+    let tld = if tld.is_empty() { "test" } else { tld };
+    let mut changed = false;
+
+    let mut candidate_dirs: Vec<std::path::PathBuf> = Vec::new();
+    if www_root.is_dir() {
+        if let Ok(entries) = fs::read_dir(www_root) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    candidate_dirs.push(p);
+                }
+            }
+        }
+    }
+    for linked in &config.linked_sites {
+        let p = Path::new(linked);
+        if p.is_dir() {
+            candidate_dirs.push(p.to_path_buf());
+        }
+    }
+
+    for dir in candidate_dirs {
+        let Some(folder_name) = dir.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if folder_name.starts_with('.') {
+            continue;
+        }
+        let label = sanitize_domain_label(folder_name);
+        if label.is_empty() {
+            continue;
+        }
+        let domain_key = format!("{label}.{tld}").to_lowercase();
+        if config.site_php_versions.contains_key(&domain_key) {
+            continue;
+        }
+        if let Some(rc_ver) = read_envstackrc_php(&dir) {
+            if let Some(bin) = find_php_binary_for_pin(&rc_ver, php_bins) {
+                config.site_php_versions.insert(domain_key, bin.id.clone());
+                changed = true;
+            }
+        }
+    }
+
+    changed
 }
 
 fn detect_doc_root_and_framework(project_dir: &Path) -> (std::path::PathBuf, String) {
@@ -70,7 +230,7 @@ fn detect_doc_root_and_framework(project_dir: &Path) -> (std::path::PathBuf, Str
     (doc_root, framework)
 }
 
-fn sanitize_domain_label(name: &str) -> String {
+pub fn sanitize_domain_label(name: &str) -> String {
     let cleaned: String = name
         .to_lowercase()
         .chars()
@@ -85,12 +245,22 @@ fn sanitize_domain_label(name: &str) -> String {
     cleaned.trim_matches('-').to_string()
 }
 
+fn format_php_label(bin: &BinaryItem) -> String {
+    match bin.variant.as_deref() {
+        Some(v) if !v.is_empty() => format!("{} ({v})", bin.version),
+        _ => bin.version.clone(),
+    }
+}
+
 fn build_site_entry(
     path: &Path,
     tld: &str,
     ssl_dir: &Path,
     web_ports: (u16, u16),
     is_linked: bool,
+    config: &AppConfig,
+    php_bins: &[BinaryItem],
+    pinned_ports: &HashMap<String, u16>,
 ) -> Option<SiteInfo> {
     if !path.is_dir() {
         return None;
@@ -125,6 +295,26 @@ fn build_site_entry(
         format!("https://{domain}:{https_port}")
     };
 
+    let pin_raw = config
+        .site_php_versions
+        .get(&domain.to_lowercase())
+        .cloned()
+        .or_else(|| read_envstackrc_php(path));
+
+    let pinned_bin = pin_raw
+        .as_deref()
+        .and_then(|raw| find_php_binary_for_pin(raw, php_bins));
+
+    let (php_version_id, php_version_label, php_cgi_port) = if let Some(bin) = pinned_bin {
+        let port = pinned_ports
+            .get(&bin.id)
+            .copied()
+            .unwrap_or(config.ports.php_cgi);
+        (Some(bin.id.clone()), Some(format_php_label(bin)), port)
+    } else {
+        (None, None, config.ports.php_cgi)
+    };
+
     Some(SiteInfo {
         name: folder_name.to_string(),
         domain,
@@ -135,12 +325,16 @@ fn build_site_entry(
         is_linked,
         http_url,
         https_url,
+        php_version_id,
+        php_version_label,
+        php_cgi_port,
     })
 }
 
 pub fn scan_sites(
     www_root: &Path,
     config: &AppConfig,
+    inventory: &Inventory,
     ssl_dir: &Path,
     portable_root: &Path,
     web_ports: (u16, u16),
@@ -151,6 +345,13 @@ pub fn scan_sites(
         .to_string_lossy()
         .trim_end_matches(['\\', '/'])
         .to_lowercase();
+
+    let php_bins = inventory
+        .binaries
+        .get("php")
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let pinned_ports = resolve_pinned_php_ports(config, inventory);
 
     let mut sites = Vec::new();
     let mut seen_domains = HashSet::new();
@@ -166,7 +367,16 @@ pub fn scan_sites(
                 if !norm_root.is_empty() && norm_path == norm_root {
                     continue;
                 }
-                if let Some(site) = build_site_entry(&path, tld, ssl_dir, web_ports, false) {
+                if let Some(site) = build_site_entry(
+                    &path,
+                    tld,
+                    ssl_dir,
+                    web_ports,
+                    false,
+                    config,
+                    php_bins,
+                    &pinned_ports,
+                ) {
                     if seen_domains.insert(site.domain.to_lowercase()) {
                         sites.push(site);
                     }
@@ -177,7 +387,16 @@ pub fn scan_sites(
 
     for linked in &config.linked_sites {
         let path = Path::new(linked);
-        if let Some(site) = build_site_entry(path, tld, ssl_dir, web_ports, true) {
+        if let Some(site) = build_site_entry(
+            path,
+            tld,
+            ssl_dir,
+            web_ports,
+            true,
+            config,
+            php_bins,
+            &pinned_ports,
+        ) {
             if seen_domains.insert(site.domain.to_lowercase()) {
                 sites.push(site);
             }
@@ -194,7 +413,7 @@ pub fn render_nginx_site_conf(
     ssl_dir: &Path,
 ) -> String {
     let doc_root = slash_path(Path::new(&site.doc_root));
-    let php_port = config.ports.php_cgi;
+    let php_port = site.php_cgi_port;
     let http_port = config.ports.nginx_http;
     let https_port = config.ports.nginx_https;
     let domain = &site.domain;
@@ -274,10 +493,11 @@ pub fn render_apache_site_conf(
     let doc_root = slash_path(Path::new(&site.doc_root));
     let http_port = config.ports.apache_http;
     let https_port = config.ports.apache_https;
-    let php_port = config.ports.php_cgi;
+    let php_port = site.php_cgi_port;
+    let effective_fcgi = use_fcgi || site.php_cgi_port != config.ports.php_cgi;
     let domain = &site.domain;
 
-    let fcgi_block = if use_fcgi {
+    let fcgi_block = if effective_fcgi {
         format!(
             r#"    ProxyFCGIBackendType GENERIC
     ProxyFCGISetEnvIf "reqenv('SCRIPT_FILENAME') =~ m#^(?:proxy:fcgi://[^/]+)?/([A-Za-z]:/.*)#" SCRIPT_FILENAME "$1"
@@ -555,6 +775,43 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+
+    fn sample_inventory_with_two_phps() -> Inventory {
+        let mut binaries = BTreeMap::new();
+        binaries.insert(
+            "php".to_string(),
+            vec![
+                BinaryItem {
+                    id: r"C:\Env\bin\php\php-8.4.28".into(),
+                    kind: "php".into(),
+                    name: "php-8.4.28".into(),
+                    version: "8.4.28".into(),
+                    source: "portable".into(),
+                    root_dir: r"C:\Env\bin\php\php-8.4.28".into(),
+                    exe_path: r"C:\Env\bin\php\php-8.4.28\php.exe".into(),
+                    bin_dir: r"C:\Env\bin\php\php-8.4.28".into(),
+                    variant: Some("TS".into()),
+                },
+                BinaryItem {
+                    id: r"C:\Env\bin\php\php-8.2.28".into(),
+                    kind: "php".into(),
+                    name: "php-8.2.28".into(),
+                    version: "8.2.28".into(),
+                    source: "portable".into(),
+                    root_dir: r"C:\Env\bin\php\php-8.2.28".into(),
+                    exe_path: r"C:\Env\bin\php\php-8.2.28\php.exe".into(),
+                    bin_dir: r"C:\Env\bin\php\php-8.2.28".into(),
+                    variant: Some("NTS".into()),
+                },
+            ],
+        );
+        Inventory {
+            binaries,
+            active_versions: HashMap::new(),
+            detected_db_clients: Vec::new(),
+        }
+    }
 
     #[test]
     fn merge_hosts_block_is_idempotent() {
@@ -575,8 +832,18 @@ mod tests {
     }
 
     #[test]
-    fn nginx_vhost_uses_forward_slashes() {
-        let site = SiteInfo {
+    fn nginx_vhost_uses_forward_slashes_and_pinned_port() {
+        let mut cfg = AppConfig::default();
+        cfg.active_versions
+            .insert("php".into(), r"C:\Env\bin\php\php-8.4.28".into());
+        cfg.site_php_versions
+            .insert("legacy.test".into(), r"C:\Env\bin\php\php-8.2.28".into());
+        let inv = sample_inventory_with_two_phps();
+        let pinned = resolve_pinned_php_ports(&cfg, &inv);
+        assert_eq!(pinned.get(r"C:\Env\bin\php\php-8.2.28").copied(), Some(9001));
+        assert!(!pinned.contains_key(r"C:\Env\bin\php\php-8.4.28"));
+
+        let unpinned_site = SiteInfo {
             name: "demo".into(),
             domain: "demo.test".into(),
             path: r"C:\DevStack\www\demo".into(),
@@ -586,18 +853,49 @@ mod tests {
             is_linked: false,
             http_url: "http://demo.test".into(),
             https_url: "https://demo.test".into(),
+            php_version_id: None,
+            php_version_label: None,
+            php_cgi_port: 9000,
         };
-        let cfg = AppConfig::default();
-        let rendered = render_nginx_site_conf(&site, &cfg, Path::new(r"C:\EnvStack\etc\ssl"));
+        let rendered =
+            render_nginx_site_conf(&unpinned_site, &cfg, Path::new(r"C:\EnvStack\etc\ssl"));
         assert!(rendered.contains("root \"C:/DevStack/www/demo/public\";"));
-        assert!(rendered.contains("C:/EnvStack/etc/ssl/certs/demo.test.crt"));
+        assert!(rendered.contains("fastcgi_pass 127.0.0.1:9000;"));
         assert!(!rendered.contains(r"C:\"));
 
-        let apache_rendered =
-            render_apache_site_conf(&site, &cfg, Path::new(r"C:\EnvStack\etc\ssl"), true);
-        assert!(apache_rendered.contains("SetHandler \"proxy:fcgi://127.0.0.1:9000/\""));
-        assert!(apache_rendered.contains("ProxyFCGISetEnvIf"));
-        assert!(!apache_rendered.contains("MultiViews"));
+        let pinned_site = SiteInfo {
+            domain: "legacy.test".into(),
+            php_version_id: Some(r"C:\Env\bin\php\php-8.2.28".into()),
+            php_version_label: Some("8.2.28 (NTS)".into()),
+            php_cgi_port: 9001,
+            ..unpinned_site
+        };
+        let nginx_pinned =
+            render_nginx_site_conf(&pinned_site, &cfg, Path::new(r"C:\EnvStack\etc\ssl"));
+        assert!(nginx_pinned.contains("fastcgi_pass 127.0.0.1:9001;"));
+
+        // Even if global Apache uses mod_php (use_fcgi = false), pinned sites proxy to their port
+        let apache_pinned =
+            render_apache_site_conf(&pinned_site, &cfg, Path::new(r"C:\EnvStack\etc\ssl"), false);
+        assert!(apache_pinned.contains("SetHandler \"proxy:fcgi://127.0.0.1:9001/\""));
+        assert!(apache_pinned.contains("ProxyFCGISetEnvIf"));
+    }
+
+    #[test]
+    fn envstackrc_round_trip() {
+        let base = std::env::temp_dir().join(format!("envstack_rc_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+
+        assert_eq!(read_envstackrc_php(&base), None);
+        write_envstackrc_php(&base, Some("8.2.28")).unwrap();
+        assert_eq!(read_envstackrc_php(&base).as_deref(), Some("8.2.28"));
+
+        write_envstackrc_php(&base, None).unwrap();
+        assert_eq!(read_envstackrc_php(&base), None);
+        assert!(!base.join(RC_FILE_NAME).exists());
+
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -615,18 +913,24 @@ mod tests {
 
         let mut cfg = AppConfig::default();
         cfg.linked_sites.push(linked_dir.to_string_lossy().to_string());
-        let apache_sites = scan_sites(&www, &cfg, &ssl, &base, (8080, 8443));
+        let inv = Inventory {
+            binaries: BTreeMap::new(),
+            active_versions: HashMap::new(),
+            detected_db_clients: Vec::new(),
+        };
+        let apache_sites = scan_sites(&www, &cfg, &inv, &ssl, &base, (8080, 8443));
         assert_eq!(apache_sites.len(), 2);
         let env_site = apache_sites.iter().find(|s| s.name == "envstackui").unwrap();
         assert!(!env_site.is_linked);
         assert_eq!(env_site.http_url, "http://envstackui.test:8080");
         assert_eq!(env_site.https_url, "https://envstackui.test:8443");
+        assert_eq!(env_site.php_cgi_port, 9000);
 
         let client_site = apache_sites.iter().find(|s| s.name == "client-portal").unwrap();
         assert!(client_site.is_linked);
         assert_eq!(client_site.domain, "client-portal.test");
 
-        let nginx_sites = scan_sites(&www, &cfg, &ssl, &base, (80, 443));
+        let nginx_sites = scan_sites(&www, &cfg, &inv, &ssl, &base, (80, 443));
         let env_nginx = nginx_sites.iter().find(|s| s.name == "envstackui").unwrap();
         assert_eq!(env_nginx.http_url, "http://envstackui.test");
         assert_eq!(env_nginx.https_url, "https://envstackui.test");

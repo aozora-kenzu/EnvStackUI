@@ -1,5 +1,6 @@
 use crate::portable::{AppConfig, CREATE_NO_WINDOW};
-use crate::scanner::{get_active_binary, Inventory};
+use crate::scanner::{get_active_binary, BinaryItem, Inventory};
+use crate::vhosts;
 use anyhow::{anyhow, Context, Result};
 use std::collections::HashSet;
 use std::os::windows::process::CommandExt;
@@ -8,35 +9,82 @@ use std::process::Command;
 use winreg::enums::*;
 use winreg::RegKey;
 
-pub fn build_active_bin_dirs(config: &AppConfig, inventory: &Inventory) -> Vec<String> {
+fn push_bin_dirs(dirs: &mut Vec<String>, seen: &mut HashSet<String>, bin: &BinaryItem, kind: &str) {
+    for candidate in [&bin.bin_dir, &bin.root_dir] {
+        let p = Path::new(candidate);
+        if p.is_dir() && seen.insert(candidate.to_lowercase()) {
+            dirs.push(candidate.clone());
+        }
+    }
+    // Also include Scripts/ for portable Python pip
+    if kind == "python" {
+        let scripts = Path::new(&bin.root_dir).join("Scripts");
+        if scripts.is_dir() {
+            let s = scripts.to_string_lossy().to_string();
+            if seen.insert(s.to_lowercase()) {
+                dirs.push(s);
+            }
+        }
+    }
+}
+
+fn find_pinned_php_for_cwd<'a>(
+    cwd: &Path,
+    config: &AppConfig,
+    inventory: &'a Inventory,
+) -> Option<&'a BinaryItem> {
+    let php_bins = inventory.binaries.get("php").map(Vec::as_slice).unwrap_or(&[]);
+    if php_bins.is_empty() {
+        return None;
+    }
+
+    if let Some(rc_pin) = vhosts::read_envstackrc_php(cwd) {
+        if let Some(bin) = vhosts::find_php_binary_for_pin(&rc_pin, php_bins) {
+            return Some(bin);
+        }
+    }
+
+    let tld = config.tld.trim().trim_start_matches('.');
+    let tld = if tld.is_empty() { "test" } else { tld };
+    if let Some(folder) = cwd.file_name().and_then(|s| s.to_str()) {
+        let label = vhosts::sanitize_domain_label(folder);
+        let domain_key = format!("{label}.{tld}").to_lowercase();
+        if let Some(raw_pin) = config.site_php_versions.get(&domain_key) {
+            return vhosts::find_php_binary_for_pin(raw_pin, php_bins);
+        }
+    }
+
+    None
+}
+
+pub fn build_active_bin_dirs_for_cwd(
+    config: &AppConfig,
+    inventory: &Inventory,
+    cwd: Option<&Path>,
+) -> Vec<String> {
     let order = [
         "php", "node", "composer", "git", "python", "go", "mysql", "nginx", "apache", "mailpit",
     ];
     let mut dirs = Vec::new();
     let mut seen = HashSet::new();
 
+    if let Some(dir) = cwd {
+        if let Some(pinned_php) = find_pinned_php_for_cwd(dir, config, inventory) {
+            push_bin_dirs(&mut dirs, &mut seen, pinned_php, "php");
+        }
+    }
+
     for kind in order {
         if let Some(bin) = get_active_binary(inventory, config, kind) {
-            for candidate in [&bin.bin_dir, &bin.root_dir] {
-                let p = Path::new(candidate);
-                if p.is_dir() && seen.insert(candidate.to_lowercase()) {
-                    dirs.push(candidate.clone());
-                }
-            }
-            // Also include Scripts/ for portable Python pip
-            if kind == "python" {
-                let scripts = Path::new(&bin.root_dir).join("Scripts");
-                if scripts.is_dir() {
-                    let s = scripts.to_string_lossy().to_string();
-                    if seen.insert(s.to_lowercase()) {
-                        dirs.push(s);
-                    }
-                }
-            }
+            push_bin_dirs(&mut dirs, &mut seen, bin, kind);
         }
     }
 
     dirs
+}
+
+pub fn build_active_bin_dirs(config: &AppConfig, inventory: &Inventory) -> Vec<String> {
+    build_active_bin_dirs_for_cwd(config, inventory, None)
 }
 
 pub fn build_combined_path(bin_dirs: &[String]) -> String {
@@ -53,13 +101,13 @@ pub fn open_terminal(
     config: &AppConfig,
     inventory: &Inventory,
 ) -> Result<()> {
-    let bin_dirs = build_active_bin_dirs(config, inventory);
-    let combined_path = build_combined_path(&bin_dirs);
     let work_dir = if cwd.is_dir() {
         cwd.to_path_buf()
     } else {
         std::env::current_dir().unwrap_or_else(|_| Path::new("C:\\").to_path_buf())
     };
+    let bin_dirs = build_active_bin_dirs_for_cwd(config, inventory, Some(&work_dir));
+    let combined_path = build_combined_path(&bin_dirs);
 
     let banner = "EnvStackUI Portable Shell";
 

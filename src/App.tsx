@@ -4,6 +4,7 @@ import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import { AboutModal } from './components/AboutModal';
 import { CommandPalette } from './components/CommandPalette';
 import { ContextMenu } from './components/ContextMenu';
+import { CreateDbModal } from './components/CreateDbModal';
 import { PhpExtensionsModal } from './components/PhpExtensionsModal';
 import { Sidebar } from './components/Sidebar';
 import { StatusBar } from './components/StatusBar';
@@ -39,6 +40,11 @@ export function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [phpExtOpen, setPhpExtOpen] = useState(false);
+  const [createDbModal, setCreateDbModal] = useState<{
+    open: boolean;
+    engine: 'mysql' | 'postgres';
+    initialName: string;
+  }>({ open: false, engine: 'mysql', initialName: '' });
   const [busyService, setBusyService] = useState<string | null>(null);
   const [busyAll, setBusyAll] = useState(false);
   const [rescanning, setRescanning] = useState(false);
@@ -297,6 +303,16 @@ export function App() {
       const updated = await api.removeLinkedSite(path);
       setBootstrap(updated);
       showToast(fmt(dict.toasts.siteUnlinked, { path }), 'info');
+    } catch (e) {
+      showToast(String(e), 'err');
+    }
+  };
+
+  const handleSetSitePhpVersion = async (domain: string, phpVersionId: string | null) => {
+    try {
+      const updated = await api.setSitePhpVersion(domain, phpVersionId);
+      setBootstrap(updated);
+      showToast(fmt(dict.toasts.sitePhpUpdated, { domain }), 'ok');
     } catch (e) {
       showToast(String(e), 'err');
     }
@@ -605,6 +621,9 @@ export function App() {
                 onRescan={handleRescan}
                 onOpenAdminer={handleOpenAdminer}
                 onLaunchDbClient={handleLaunchDbClient}
+                onOpenCreateDb={(engine) =>
+                  setCreateDbModal({ open: true, engine, initialName: '' })
+                }
                 onOpenPhpExtensions={() => setPhpExtOpen(true)}
                 onOpenUrl={(u) => api.openExternalUrl(u)}
               />
@@ -622,6 +641,10 @@ export function App() {
                 onRegenerateVhosts={handleRegenerateVhosts}
                 onLinkSite={handleAddLinkedSite}
                 onUnlinkSite={handleRemoveLinkedSite}
+                onSetSitePhp={handleSetSitePhpVersion}
+                onOpenCreateDb={(suggestedName) =>
+                  setCreateDbModal({ open: true, engine: 'mysql', initialName: suggestedName })
+                }
                 onEnableWildcardDns={handleEnableWildcardDns}
                 onDisableWildcardDns={handleDisableWildcardDns}
                 onOpenWww={() => api.openPathInExplorer(bootstrap.www_root)}
@@ -773,6 +796,16 @@ export function App() {
           onClose={() => setPhpExtOpen(false)}
           onRestartServices={() => void handleRestartAll()}
           onNotify={showToast}
+        />
+
+        <CreateDbModal
+          open={createDbModal.open}
+          engine={createDbModal.engine}
+          initialName={createDbModal.initialName}
+          onClose={() => setCreateDbModal((prev) => ({ ...prev, open: false }))}
+          onCreated={(dbName, eng) =>
+            showToast(fmt(dict.toasts.dbCreated, { name: dbName, engine: eng }), 'ok')
+          }
         />
 
         <ContextMenu

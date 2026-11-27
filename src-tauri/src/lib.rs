@@ -179,7 +179,7 @@ fn sync_vhosts_with_clones(
     let statuses = services.get_statuses(cfg, inv);
     let web_ports = resolve_active_web_ports(cfg, &statuses);
     let www_root = paths.active_www_root(cfg);
-    let sites = vhosts::scan_sites(&www_root, cfg, &paths.etc_ssl, &paths.root, web_ports);
+    let sites = vhosts::scan_sites(&www_root, cfg, inv, &paths.etc_ssl, &paths.root, web_ports);
     let apache_fcgi = !apache_uses_mod_php(inv, cfg);
     vhosts::generate_vhost_configs(paths, cfg, &sites, apache_fcgi)
 }
@@ -209,6 +209,7 @@ fn build_bootstrap(state: &AppState) -> AppBootstrap {
     let sites = vhosts::scan_sites(
         &www_root,
         &config,
+        &inventory,
         &state.paths.etc_ssl,
         &state.paths.root,
         web_ports,
@@ -537,7 +538,8 @@ async fn sync_hosts(state: State<'_, AppState>) -> Result<HostsSyncStatus, Strin
 
     tokio::task::spawn_blocking(move || {
         let www_root = paths.active_www_root(&cfg);
-        let sites = vhosts::scan_sites(&www_root, &cfg, &paths.etc_ssl, &paths.root, web_ports);
+        let sites =
+            vhosts::scan_sites(&www_root, &cfg, &inv, &paths.etc_ssl, &paths.root, web_ports);
         vhosts::sync_hosts_file(&paths, &sites, &cfg.tld).map_err(|e| format!("{e:#}"))
     })
     .await
@@ -623,6 +625,116 @@ async fn remove_linked_site(
     .map_err(|e| e.to_string())??;
 
     Ok(build_bootstrap(&state))
+}
+
+#[tauri::command]
+async fn set_site_php_version(
+    domain: String,
+    php_version_id: Option<String>,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<AppBootstrap, String> {
+    let domain_key = domain.trim().to_lowercase();
+    let pin_val = php_version_id
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let (cfg, inv) = {
+        let mut cfg = state.config.lock().unwrap();
+        let inv = state.inventory.lock().unwrap().clone();
+        let php_bins = inv.binaries.get("php").map(Vec::as_slice).unwrap_or(&[]);
+
+        let global_php = cfg.active_versions.get("php").cloned();
+        let resolved_bin = pin_val
+            .as_deref()
+            .and_then(|v| vhosts::find_php_binary_for_pin(v, php_bins))
+            .cloned();
+
+        if let Some(ref bin) = resolved_bin {
+            if Some(&bin.id) == global_php.as_ref() {
+                cfg.site_php_versions.remove(&domain_key);
+            } else {
+                cfg.site_php_versions.insert(domain_key.clone(), bin.id.clone());
+            }
+        } else if pin_val.is_some() {
+            return Err("Selected PHP version was not found in inventory".into());
+        } else {
+            cfg.site_php_versions.remove(&domain_key);
+        }
+
+        save_config(&state.paths, &cfg).map_err(|e| e.to_string())?;
+
+        // Persist .envstackrc inside the matching site folder
+        let www_root = state.paths.active_www_root(&cfg);
+        let statuses = state.services.get_statuses(&cfg, &inv);
+        let web_ports = resolve_active_web_ports(&cfg, &statuses);
+        let sites = vhosts::scan_sites(
+            &www_root,
+            &cfg,
+            &inv,
+            &state.paths.etc_ssl,
+            &state.paths.root,
+            web_ports,
+        );
+        if let Some(site) = sites.iter().find(|s| s.domain.eq_ignore_ascii_case(&domain_key)) {
+            let rc_ver = resolved_bin
+                .as_ref()
+                .filter(|b| Some(&b.id) != global_php.as_ref())
+                .map(|b| b.version.as_str());
+            vhosts::write_envstackrc_php(std::path::Path::new(&site.path), rc_ver)
+                .map_err(|e| format!("{e:#}"))?;
+        }
+
+        (cfg.clone(), inv)
+    };
+
+    let paths = state.paths.clone();
+    let services = state.services.clone();
+    tokio::task::spawn_blocking(move || {
+        sync_vhosts_with_clones(&paths, &cfg, &inv, &services).map_err(|e| format!("{e:#}"))?;
+        let statuses = services.get_statuses(&cfg, &inv);
+        let web_or_php_running = statuses
+            .iter()
+            .any(|s| matches!(s.id.as_str(), "apache" | "nginx" | "php") && s.state == "running");
+        if web_or_php_running {
+            services
+                .sync_pinned_php_workers(&paths, &cfg, &inv, Some(&app))
+                .map_err(|e| format!("{e:#}"))?;
+        }
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    Ok(build_bootstrap(&state))
+}
+
+#[tauri::command]
+async fn list_databases(engine: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let cfg = state.config.lock().unwrap().clone();
+    let inv = state.inventory.lock().unwrap().clone();
+    tokio::task::spawn_blocking(move || match engine.as_str() {
+        "mysql" => services::list_mysql_databases(&cfg, &inv).map_err(|e| format!("{e:#}")),
+        other => Err(format!("Unsupported database engine: {other}")),
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn create_database(
+    engine: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let cfg = state.config.lock().unwrap().clone();
+    let inv = state.inventory.lock().unwrap().clone();
+    tokio::task::spawn_blocking(move || match engine.as_str() {
+        "mysql" => services::create_mysql_database(&name, &cfg, &inv).map_err(|e| format!("{e:#}")),
+        other => Err(format!("Unsupported database engine: {other}")),
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1151,7 +1263,8 @@ pub fn run() {
             let initial_www = paths.active_www_root(&config);
             let seeded = portable::ensure_default_website(&initial_www, &mut config).unwrap_or(false);
             let (inventory, changed) = scanner::scan_inventory(&paths, &mut config);
-            if changed || seeded {
+            let rc_changed = vhosts::sync_envstackrc_pins_to_config(&initial_www, &mut config, &inventory);
+            if changed || seeded || rc_changed {
                 let _ = save_config(&paths, &config);
             }
 
@@ -1252,6 +1365,9 @@ pub fn run() {
             regenerate_root_ca,
             add_linked_site,
             remove_linked_site,
+            set_site_php_version,
+            list_databases,
+            create_database,
             get_php_extensions,
             toggle_php_extension,
             enable_wildcard_dns,
