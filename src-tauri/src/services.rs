@@ -13,7 +13,9 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 
-pub const ALL_SERVICES: [&str; 5] = ["apache", "nginx", "php", "mysql", "mailpit"];
+pub const ALL_SERVICES: [&str; 7] = [
+    "apache", "nginx", "php", "mysql", "postgres", "redis", "mailpit",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceStatus {
@@ -126,6 +128,8 @@ impl ServiceManager {
                 ),
                 "php" => (config.ports.php_cgi, None, "PHP FastCGI"),
                 "mysql" => (config.ports.mysql, None, "MariaDB / MySQL"),
+                "postgres" => (config.ports.postgres, None, "PostgreSQL"),
+                "redis" => (config.ports.redis, None, "Redis"),
                 "mailpit" => (
                     config.ports.mailpit_http,
                     Some(config.ports.mailpit_smtp),
@@ -227,6 +231,8 @@ impl ServiceManager {
                 self.sync_pinned_php_workers(paths, config, inventory, app)
             }
             "mysql" => self.start_mysql(bin, paths, config),
+            "postgres" => self.start_postgres(bin, paths, config),
+            "redis" => self.start_redis(bin, paths, config),
             "mailpit" => self.start_mailpit(bin, paths, config),
             _ => Err(anyhow!("Unsupported service {id}")),
         };
@@ -301,6 +307,55 @@ impl ServiceManager {
                                 }
                                 let _ = admin_child.kill();
                                 let _ = admin_child.wait();
+                            }
+                        }
+                    }
+                }
+            } else if id == "postgres" {
+                if let Some(exe) = proc_info.exe_path.as_ref() {
+                    if let Some(bin_dir) = exe.parent() {
+                        let pg_ctl = bin_dir.join("pg_ctl.exe");
+                        if pg_ctl.is_file() {
+                            let _ = Command::new(&pg_ctl)
+                                .args([
+                                    "-D",
+                                    &slash_path(&paths.data_postgres),
+                                    "-m",
+                                    "fast",
+                                    "stop",
+                                ])
+                                .stdout(Stdio::null())
+                                .stderr(Stdio::null())
+                                .creation_flags(CREATE_NO_WINDOW)
+                                .output();
+                            if let Some(child) = proc_info.child.as_mut() {
+                                if let Ok(Some(_)) = child.try_wait() {
+                                    exited_gracefully = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if id == "redis" {
+                if let Some(exe) = proc_info.exe_path.as_ref() {
+                    if let Some(bin_dir) = exe.parent() {
+                        let cli = ["redis-cli.exe", "valkey-cli.exe"]
+                            .into_iter()
+                            .map(|name| bin_dir.join(name))
+                            .find(|p| p.is_file());
+                        if let Some(cli_exe) = cli {
+                            let port_str = proc_info.port.to_string();
+                            let _ = Command::new(&cli_exe)
+                                .args(["-p", &port_str, "shutdown"])
+                                .stdout(Stdio::null())
+                                .stderr(Stdio::null())
+                                .creation_flags(CREATE_NO_WINDOW)
+                                .output();
+                            std::thread::sleep(std::time::Duration::from_millis(250));
+                            if let Some(child) = proc_info.child.as_mut() {
+                                if let Ok(Some(_)) = child.try_wait() {
+                                    exited_gracefully = true;
+                                }
                             }
                         }
                     }
@@ -1404,6 +1459,135 @@ impl ServiceManager {
 
         Ok(())
     }
+
+    fn start_postgres(
+        &self,
+        bin: &BinaryItem,
+        paths: &PortablePaths,
+        config: &AppConfig,
+    ) -> Result<()> {
+        if !Self::is_port_free(config.ports.postgres) {
+            return Err(Self::port_in_use_error(config.ports.postgres, "PostgreSQL"));
+        }
+
+        let bin_dir = Path::new(&bin.exe_path)
+            .parent()
+            .ok_or_else(|| anyhow!("Invalid PostgreSQL binary path: {}", bin.exe_path))?;
+        fs::create_dir_all(&paths.data_postgres)?;
+
+        if !paths.data_postgres.join("PG_VERSION").is_file() {
+            let initdb = bin_dir.join("initdb.exe");
+            if !initdb.is_file() {
+                return Err(anyhow!("initdb.exe not found in {}", bin_dir.display()));
+            }
+            let out = Command::new(&initdb)
+                .args([
+                    "-D",
+                    &slash_path(&paths.data_postgres),
+                    "-U",
+                    "postgres",
+                    "--auth=trust",
+                    "-E",
+                    "UTF8",
+                ])
+                .current_dir(bin_dir)
+                .creation_flags(CREATE_NO_WINDOW)
+                .output()
+                .context("Failed to initialize PostgreSQL data directory")?;
+            if !out.status.success() {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                return Err(anyhow!("PostgreSQL initdb failed: {stderr} {stdout}"));
+            }
+        }
+
+        let log_err = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(paths.logs.join("postgres-error.log"))?;
+        let log_out = log_err.try_clone()?;
+
+        let child = Command::new(&bin.exe_path)
+            .args([
+                "-D",
+                &slash_path(&paths.data_postgres),
+                "-p",
+                &config.ports.postgres.to_string(),
+                "-h",
+                "127.0.0.1",
+            ])
+            .current_dir(bin_dir)
+            .stdout(Stdio::from(log_out))
+            .stderr(Stdio::from(log_err))
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .with_context(|| format!("Failed to spawn {}", bin.exe_path))?;
+
+        let pid = child.id();
+        self.procs.lock().unwrap().insert(
+            "postgres".to_string(),
+            RunningProc {
+                child: Some(child),
+                pid,
+                desired_running: true,
+                exe_path: Some(PathBuf::from(&bin.exe_path)),
+                port: config.ports.postgres,
+            },
+        );
+        Ok(())
+    }
+
+    fn start_redis(
+        &self,
+        bin: &BinaryItem,
+        paths: &PortablePaths,
+        config: &AppConfig,
+    ) -> Result<()> {
+        if !Self::is_port_free(config.ports.redis) {
+            return Err(Self::port_in_use_error(config.ports.redis, "Redis"));
+        }
+
+        fs::create_dir_all(&paths.etc_redis)?;
+        fs::create_dir_all(&paths.data_redis)?;
+        let conf_path = paths.etc_redis.join("redis.conf");
+        let conf_body = format!(
+            "port {}\nbind 127.0.0.1\ndir \"{}\"\nappendonly yes\n",
+            config.ports.redis,
+            slash_path(&paths.data_redis)
+        );
+        fs::write(&conf_path, conf_body)?;
+
+        let log_out = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(paths.logs.join("redis.log"))?;
+        let log_err = log_out.try_clone()?;
+
+        let work_dir = Path::new(&bin.exe_path)
+            .parent()
+            .unwrap_or_else(|| Path::new(&bin.root_dir));
+        let child = Command::new(&bin.exe_path)
+            .arg(slash_path(&conf_path))
+            .current_dir(work_dir)
+            .stdout(Stdio::from(log_out))
+            .stderr(Stdio::from(log_err))
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .with_context(|| format!("Failed to spawn {}", bin.exe_path))?;
+
+        let pid = child.id();
+        self.procs.lock().unwrap().insert(
+            "redis".to_string(),
+            RunningProc {
+                child: Some(child),
+                pid,
+                desired_running: true,
+                exe_path: Some(PathBuf::from(&bin.exe_path)),
+                port: config.ports.redis,
+            },
+        );
+        Ok(())
+    }
 }
 
 pub fn validate_db_name(raw: &str) -> Result<String> {
@@ -1510,6 +1694,98 @@ pub fn create_mysql_database(
     }
 
     list_mysql_databases(config, inventory)
+}
+
+fn find_postgres_psql_exe(config: &AppConfig, inventory: &Inventory) -> Result<PathBuf> {
+    let bin = get_active_binary(inventory, config, "postgres")
+        .ok_or_else(|| anyhow!("No PostgreSQL binary is configured."))?;
+    let exe_parent = Path::new(&bin.exe_path)
+        .parent()
+        .unwrap_or_else(|| Path::new(&bin.bin_dir));
+    let psql = exe_parent.join("psql.exe");
+    if psql.is_file() {
+        Ok(psql)
+    } else {
+        Err(anyhow!("psql.exe was not found next to {}", bin.exe_path))
+    }
+}
+
+pub fn list_postgres_databases(config: &AppConfig, inventory: &Inventory) -> Result<Vec<String>> {
+    let psql = find_postgres_psql_exe(config, inventory)?;
+    let port_str = config.ports.postgres.to_string();
+    let out = Command::new(&psql)
+        .args([
+            "-h",
+            "127.0.0.1",
+            "-p",
+            &port_str,
+            "-U",
+            "postgres",
+            "-d",
+            "postgres",
+            "-t",
+            "-A",
+            "-c",
+            "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .with_context(|| format!("Failed to execute {}", psql.display()))?;
+
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(anyhow!(
+            "Could not connect to PostgreSQL on port {port_str}: {stderr}"
+        ));
+    }
+
+    let mut list: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("postgres"))
+        .map(String::from)
+        .collect();
+    list.sort_by_key(|a| a.to_lowercase());
+    Ok(list)
+}
+
+pub fn create_postgres_database(
+    name: &str,
+    config: &AppConfig,
+    inventory: &Inventory,
+) -> Result<Vec<String>> {
+    let safe_name = validate_db_name(name)?;
+    let existing = list_postgres_databases(config, inventory)?;
+    if existing.iter().any(|d| d == &safe_name) {
+        return Ok(existing);
+    }
+
+    let psql = find_postgres_psql_exe(config, inventory)?;
+    let port_str = config.ports.postgres.to_string();
+    let sql = format!("CREATE DATABASE \"{safe_name}\";");
+    let out = Command::new(&psql)
+        .args([
+            "-h",
+            "127.0.0.1",
+            "-p",
+            &port_str,
+            "-U",
+            "postgres",
+            "-d",
+            "postgres",
+            "-c",
+            &sql,
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .with_context(|| format!("Failed to execute {}", psql.display()))?;
+
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(anyhow!("Failed to create database '{safe_name}': {stderr}"));
+    }
+
+    list_postgres_databases(config, inventory)
 }
 
 #[cfg(test)]

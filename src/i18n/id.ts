@@ -267,6 +267,11 @@ export const id: TranslationKeys = {
     updatesSection: 'Pembaruan & Repositori',
     githubRepo: 'Repositori GitHub (owner/repo)',
     autoCheckUpdates: 'Periksa pembaruan otomatis saat popup Tentang dibuka',
+    mcpSection: 'CLI & Server MCP Agen AI',
+    mcpDesc:
+      'Gunakan perintah `envstack` di terminal portabel atau hubungkan agen AI melalui stdio MCP untuk membaca situs, log, email, dan database.',
+    mcpCopyBtn: 'Salin JSON MCP',
+    mcpCopied: 'Tersalin',
     saveSettings: 'Simpan Pengaturan',
     savedToast: 'Pengaturan tersimpan',
   },

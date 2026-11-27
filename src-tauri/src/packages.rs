@@ -684,6 +684,28 @@ pub async fn fetch_online_versions(kind: &str) -> Result<Vec<OnlineVersionItem>>
             }
             list
         }
+        "postgres" => {
+            let rels: Vec<GhRelease> = client
+                .get("https://api.github.com/repos/theseus-rs/postgresql-binaries/releases?per_page=8")
+                .header("User-Agent", ua)
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await?;
+            parse_postgres_releases(rels)
+        }
+        "redis" => {
+            let rels: Vec<GhRelease> = client
+                .get("https://api.github.com/repos/redis-windows/redis-windows/releases?per_page=8")
+                .header("User-Agent", ua)
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await?;
+            parse_redis_releases(rels)
+        }
         "mailpit" => {
             let rels: Vec<GhRelease> = client
                 .get("https://api.github.com/repos/axllent/mailpit/releases?per_page=8")
@@ -1305,6 +1327,80 @@ pub fn uninstall_package(paths: &PortablePaths, kind: &str, target_folder: &str)
     Ok(())
 }
 
+fn parse_postgres_releases(rels: Vec<GhRelease>) -> Vec<OnlineVersionItem> {
+    let mut list = Vec::new();
+    for rel in rels {
+        if let Some(asset) = rel.assets.into_iter().find(|a| {
+            let n = a.name.to_lowercase();
+            n.contains("x86_64-pc-windows-msvc") && n.ends_with(".zip")
+        }) {
+            let tag = rel.tag_name.unwrap_or_else(|| "latest".into());
+            let ver = tag.trim_start_matches('v').to_string();
+            list.push(OnlineVersionItem {
+                id: format!("postgres-{ver}"),
+                kind: "postgres".into(),
+                name: format!("PostgreSQL {ver} (x64)"),
+                version: ver.clone(),
+                variant: Some("MSVC x64".into()),
+                url: asset.browser_download_url,
+                archive_type: "zip".into(),
+                target_folder: format!("postgres-{ver}"),
+                source_label: "theseus-rs/postgresql-binaries".into(),
+                size_bytes: asset.size,
+                size_label: asset.size.map(format_bytes),
+                tags: vec!["stable".into()],
+            });
+        }
+    }
+    list
+}
+
+fn parse_redis_releases(rels: Vec<GhRelease>) -> Vec<OnlineVersionItem> {
+    let mut list = Vec::new();
+    for rel in rels {
+        let candidates: Vec<GhAsset> = rel
+            .assets
+            .into_iter()
+            .filter(|a| {
+                let n = a.name.to_lowercase();
+                n.contains("windows")
+                    && n.contains("x64")
+                    && n.ends_with(".zip")
+                    && !n.contains("with-service")
+            })
+            .collect();
+        let picked = candidates
+            .iter()
+            .position(|a| a.name.to_lowercase().contains("msys2"))
+            .or(if candidates.is_empty() { None } else { Some(0) });
+
+        if let Some(idx) = picked {
+            let asset = &candidates[idx];
+            let tag = rel.tag_name.unwrap_or_else(|| "latest".into());
+            let ver = tag.trim_start_matches('v').to_string();
+            list.push(OnlineVersionItem {
+                id: format!("redis-{ver}"),
+                kind: "redis".into(),
+                name: format!("Redis {ver} (x64)"),
+                version: ver.clone(),
+                variant: Some(if asset.name.to_lowercase().contains("msys2") {
+                    "MSYS2 x64".into()
+                } else {
+                    "Cygwin x64".into()
+                }),
+                url: asset.browser_download_url.clone(),
+                archive_type: "zip".into(),
+                target_folder: format!("redis-{ver}"),
+                source_label: "redis-windows/redis-windows".into(),
+                size_bytes: asset.size,
+                size_label: asset.size.map(format_bytes),
+                tags: vec!["stable".into()],
+            });
+        }
+    }
+    list
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1539,5 +1635,62 @@ mod tests {
         assert_eq!(loaded.get("php").unwrap().fetched_at, 1_700_000_000);
 
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn parses_postgres_and_redis_releases() {
+        let pg_json = serde_json::json!([
+            {
+                "tag_name": "18.7.0",
+                "assets": [
+                    {
+                        "name": "postgresql-18.7.0-aarch64-pc-windows-msvc.zip",
+                        "browser_download_url": "https://example.com/arm64.zip",
+                        "size": 48_000_000u64
+                    },
+                    {
+                        "name": "postgresql-18.7.0-x86_64-pc-windows-msvc.zip",
+                        "browser_download_url": "https://example.com/x64.zip",
+                        "size": 50_000_000u64
+                    }
+                ]
+            }
+        ]);
+        let pg_rels: Vec<GhRelease> = serde_json::from_value(pg_json).unwrap();
+        let pg_items = parse_postgres_releases(pg_rels);
+        assert_eq!(pg_items.len(), 1);
+        assert_eq!(pg_items[0].kind, "postgres");
+        assert_eq!(pg_items[0].version, "18.7.0");
+        assert_eq!(pg_items[0].target_folder, "postgres-18.7.0");
+
+        let redis_json = serde_json::json!([
+            {
+                "tag_name": "8.10.3",
+                "assets": [
+                    {
+                        "name": "Redis-8.10.3-Windows-x64-msys2-with-Service.zip",
+                        "browser_download_url": "https://example.com/service.zip",
+                        "size": 20_000_000u64
+                    },
+                    {
+                        "name": "Redis-8.10.3-Windows-x64-cygwin.zip",
+                        "browser_download_url": "https://example.com/cygwin.zip",
+                        "size": 14_800_000u64
+                    },
+                    {
+                        "name": "Redis-8.10.3-Windows-x64-msys2.zip",
+                        "browser_download_url": "https://example.com/msys2.zip",
+                        "size": 14_036_243u64
+                    }
+                ]
+            }
+        ]);
+        let redis_rels: Vec<GhRelease> = serde_json::from_value(redis_json).unwrap();
+        let redis_items = parse_redis_releases(redis_rels);
+        assert_eq!(redis_items.len(), 1);
+        assert_eq!(redis_items[0].kind, "redis");
+        assert_eq!(redis_items[0].version, "8.10.3");
+        assert_eq!(redis_items[0].url, "https://example.com/msys2.zip");
+        assert_eq!(redis_items[0].variant.as_deref(), Some("MSYS2 x64"));
     }
 }

@@ -265,6 +265,11 @@ export const en = {
     updatesSection: 'Updates & Repository',
     githubRepo: 'GitHub Repository (owner/repo)',
     autoCheckUpdates: 'Automatically check for updates when opening About',
+    mcpSection: 'CLI & AI Agent MCP Server',
+    mcpDesc:
+      'Use `envstack` in the portable terminal or connect AI coding agents via stdio MCP to inspect sites, logs, emails, and databases.',
+    mcpCopyBtn: 'Copy MCP JSON',
+    mcpCopied: 'Copied',
     saveSettings: 'Save Settings',
     savedToast: 'Settings saved',
   },

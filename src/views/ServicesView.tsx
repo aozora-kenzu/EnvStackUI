@@ -348,11 +348,11 @@ export function ServicesView({
                     </button>
                   )}
 
-                  {svc.id === 'mysql' && (
+                  {(svc.id === 'mysql' || svc.id === 'postgres') && (
                     <>
                       <button
                         type="button"
-                        onClick={() => onOpenCreateDb('mysql')}
+                        onClick={() => onOpenCreateDb(svc.id as 'mysql' | 'postgres')}
                         title={t.services.createDatabase}
                         aria-label={t.services.createDatabase}
                         className="ui-btn w-7 h-7 p-0 flex items-center justify-center shrink-0"

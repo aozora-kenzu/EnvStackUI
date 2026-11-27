@@ -10,9 +10,18 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const DEFAULT_GITHUB_REPO: &str = "aozora-kenzu/EnvStackUI";
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-pub const ALL_BINARY_KINDS: [&str; 10] = [
-    "nginx", "apache", "php", "mysql", "mailpit", "node", "composer", "git", "python", "go",
+pub const ALL_BINARY_KINDS: [&str; 12] = [
+    "nginx", "apache", "php", "mysql", "postgres", "redis", "mailpit", "node", "composer", "git",
+    "python", "go",
 ];
+
+fn default_postgres_port() -> u16 {
+    5432
+}
+
+fn default_redis_port() -> u16 {
+    6379
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortConfig {
@@ -22,6 +31,10 @@ pub struct PortConfig {
     pub apache_https: u16,
     pub php_cgi: u16,
     pub mysql: u16,
+    #[serde(default = "default_postgres_port")]
+    pub postgres: u16,
+    #[serde(default = "default_redis_port")]
+    pub redis: u16,
     pub mailpit_smtp: u16,
     pub mailpit_http: u16,
 }
@@ -35,6 +48,8 @@ impl Default for PortConfig {
             apache_https: 443,
             php_cgi: 9000,
             mysql: 3306,
+            postgres: 5432,
+            redis: 6379,
             mailpit_smtp: 1025,
             mailpit_http: 8025,
         }
@@ -107,11 +122,15 @@ pub struct PortablePaths {
     pub etc_apache_sites: PathBuf,
     pub etc_php: PathBuf,
     pub etc_mysql: PathBuf,
+    pub etc_postgres: PathBuf,
+    pub etc_redis: PathBuf,
     pub etc_ssl: PathBuf,
     pub etc_ssl_certs: PathBuf,
     pub www_default: PathBuf,
     pub data: PathBuf,
     pub data_mysql: PathBuf,
+    pub data_postgres: PathBuf,
+    pub data_redis: PathBuf,
     pub logs: PathBuf,
     pub tmp: PathBuf,
     pub tmp_updates: PathBuf,
@@ -164,11 +183,15 @@ impl PortablePaths {
         let etc_apache_sites = etc_apache.join("sites-enabled");
         let etc_php = etc.join("php");
         let etc_mysql = etc.join("mysql");
+        let etc_postgres = etc.join("postgres");
+        let etc_redis = etc.join("redis");
         let etc_ssl = etc.join("ssl");
         let etc_ssl_certs = etc_ssl.join("certs");
         let www_default = root.join("www");
         let data = root.join("data");
         let data_mysql = data.join("mysql");
+        let data_postgres = data.join("postgres");
+        let data_redis = data.join("redis");
         let logs = root.join("logs");
         let tmp = root.join("tmp");
         let tmp_updates = tmp.join("updates");
@@ -186,11 +209,15 @@ impl PortablePaths {
             etc_apache_sites,
             etc_php,
             etc_mysql,
+            etc_postgres,
+            etc_redis,
             etc_ssl,
             etc_ssl_certs,
             www_default,
             data,
             data_mysql,
+            data_postgres,
+            data_redis,
             logs,
             tmp,
             tmp_updates,
@@ -211,11 +238,15 @@ impl PortablePaths {
             &self.etc_apache_sites,
             &self.etc_php,
             &self.etc_mysql,
+            &self.etc_postgres,
+            &self.etc_redis,
             &self.etc_ssl,
             &self.etc_ssl_certs,
             &self.www_default,
             &self.data,
             &self.data_mysql,
+            &self.data_postgres,
+            &self.data_redis,
             &self.logs,
             &self.tmp,
             &self.tmp_updates,

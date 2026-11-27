@@ -19,13 +19,15 @@ pub struct LogTailPayload {
     pub total_lines: usize,
 }
 
-const KNOWN_LOGS: [&str; 7] = [
+const KNOWN_LOGS: [&str; 9] = [
     "envstack.log",
     "nginx-error.log",
     "nginx-access.log",
     "apache-error.log",
     "php-cgi.log",
     "mysql-error.log",
+    "postgres-error.log",
+    "redis.log",
     "mailpit.log",
 ];
 

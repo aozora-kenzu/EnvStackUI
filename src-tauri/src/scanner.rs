@@ -39,6 +39,8 @@ fn kind_aliases(kind: &str) -> &'static [&'static str] {
         "apache" => &["apache", "httpd"],
         "php" => &["php"],
         "mysql" => &["mysql", "mariadb"],
+        "postgres" => &["postgres", "postgresql", "pgsql"],
+        "redis" => &["redis", "valkey"],
         "mailpit" => &["mailpit"],
         "node" => &["node", "nodejs"],
         "composer" => &["composer"],
@@ -60,6 +62,8 @@ fn candidate_exe_rel_paths(kind: &str) -> &'static [&'static str] {
             "mysqld.exe",
             "mariadbd.exe",
         ],
+        "postgres" => &["bin/postgres.exe", "pgsql/bin/postgres.exe", "postgres.exe"],
+        "redis" => &["redis-server.exe", "bin/redis-server.exe", "valkey-server.exe"],
         "mailpit" => &["mailpit.exe"],
         "node" => &["node.exe"],
         "composer" => &["composer.bat", "composer.phar"],
@@ -102,6 +106,19 @@ fn detect_variant(kind: &str, dir: &Path, exe: &Path) -> Option<String> {
                 Some("MySQL".to_string())
             }
         }
+        "postgres" => Some("PostgreSQL".to_string()),
+        "redis" => {
+            let fname = exe
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if fname.contains("valkey") {
+                Some("Valkey".to_string())
+            } else {
+                Some("Redis".to_string())
+            }
+        }
         _ => None,
     }
 }
@@ -114,6 +131,10 @@ fn clean_version_label(dir_name: &str, kind: &str) -> String {
         "node-".to_string(),
         "mariadb-".to_string(),
         "mysql-".to_string(),
+        "postgresql-".to_string(),
+        "postgres-".to_string(),
+        "redis-".to_string(),
+        "valkey-".to_string(),
         "php-".to_string(),
     ] {
         if lower.starts_with(&prefix) && dir_name.len() > prefix.len() {
@@ -202,9 +223,7 @@ pub fn scan_binaries_from_roots(
     external_roots: &[String],
 ) -> BTreeMap<String, Vec<BinaryItem>> {
     let mut result: BTreeMap<String, Vec<BinaryItem>> = BTreeMap::new();
-    let kinds = [
-        "nginx", "apache", "php", "mysql", "mailpit", "node", "composer", "git", "python", "go",
-    ];
+    let kinds = crate::portable::ALL_BINARY_KINDS;
 
     for kind in kinds {
         let mut items = Vec::new();

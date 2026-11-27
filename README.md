@@ -20,11 +20,13 @@ Fast, clean, zero-nag, 100% portable `.exe` — manage **Nginx**, **Apache**, **
 
 - **100% Portable & Zero Nag** — Single standalone `.exe` (~16 MB). No installer, no license popups, no background bloat, no OS pollution.
 - **1-Click Self-Update** — Built-in **Update & Restart** replaces the executable in-place with automatic PE & SHA-256 checksum verification and rollback safety.
-- **Core Local Services** — Start, stop, restart, restart all, and switch versions for **Apache** (default ports `80 / 443`, `LogFormat` + `mod_php` / Windows FastCGI), **Nginx** (ports `8080 / 8443`), **PHP FastCGI** (auto-respawn supervisor + TS/NTS detection), **MariaDB / MySQL** (auto-initialized `data/` + graceful shutdown), and **Mailpit** (SMTP + Web UI). Includes pre-start config syntax validation (`httpd -t` / `nginx -t`) and port-conflict process diagnostics.
+- **Core Local Services** — Start, stop, restart, restart all, and switch versions for **Apache** (default ports `80 / 443`, `LogFormat` + `mod_php` / Windows FastCGI), **Nginx** (ports `8080 / 8443`), **PHP FastCGI** (auto-respawn supervisor + TS/NTS detection), **MariaDB / MySQL**, **PostgreSQL**, **Redis**, and **Mailpit** (SMTP + Web UI). Includes pre-start config syntax validation (`httpd -t` / `nginx -t`), port-conflict diagnostics, and **1-Click Create Database**.
+- **Per-Project PHP Version Pinning** — Assign a dedicated PHP version per virtual host in **Sites** (persisted via `.envstackrc` + `envstack.json`), backed by isolated FastCGI worker ports and matching Portable Terminal `PATH`.
 - **One-Click PHP Extensions & Xdebug** — Toggle PHP extensions (`gd`, `intl`, `zip`, `curl`, `xdebug`, etc.) inside `etc/php/php.ini` cleanly without manual editing.
 - **Auto Virtual Hosts, Linked Projects & Local HTTPS (`*.test`)** — Watches `www/`, auto-seeds a built-in EnvStackUI landing page (`www/index.php`), lets you link external project folders outside `www/`, auto-detects `/public`, generates Nginx & Apache configs, issues trusted local TLS certificates via **EnvStackUI Local Dev CA**, and supports both Windows `hosts` sync and one-click **Wildcard DNS (`*.test` + subdomains via Windows NRPT)** with non-blocking On-Demand UAC.
 - **Live Mailpit Email Popup** — Shows a native bottom-right desktop notification whenever a local email arrives (even when minimized to System Tray); click the popup to open the message directly in **Mailpit Web UI**.
-- **Online Package Manager & Custom Importer** — Browse and install official builds of **PHP** (`windows.php.net`), **Node.js**, **Python** (`astral-sh/python-build-standalone`), **Nginx**, **Apache**, **MariaDB**, **Go**, **Mailpit**, **Composer**, and **Adminer** with live download speed, ETA, file sizes, smart filters, and uninstall support — or import any `.zip` / `.tar.gz` archive from a URL or local file.
+- **Online Package Manager & Custom Importer** — Browse and install official builds of **PHP** (`windows.php.net`), **Node.js**, **Python** (`astral-sh/python-build-standalone`), **Nginx**, **Apache**, **MariaDB**, **PostgreSQL** (`theseus-rs/postgresql-binaries`), **Redis**, **Go**, **Mailpit**, **Composer**, and **Adminer** with live download speed, ETA, file sizes, smart filters, and uninstall support — or import any `.zip` / `.tar.gz` archive from a URL or local file.
+- **CLI (`envstack`) & Built-in MCP Server** — Manage sites, PHP version pins, logs, and databases from the terminal (`envstack status`, `envstack sites`, `envstack pin`, `envstack db`), or connect AI coding agents via `envstack-ui.exe mcp` over stdio JSON-RPC.
 - **Hybrid Binary Linking** — Reuse existing toolchains on disk (e.g. `C:\AppPath` or other portable folders) without duplicating files, and unlink anytime.
 - **Multi-Runtime Portable Terminal & User PATH** — Launch Windows Terminal, PowerShell, Git Bash, or CMD with isolated active toolchains in `PATH`, or optionally sync/clean `HKCU` User `PATH`.
 - **Auto-Hosted Adminer + External DB Client** — One-click dark-themed **Adminer** (`/__adminer`) or launch HeidiSQL / DBeaver / TablePlus.
@@ -61,10 +63,10 @@ Fast, clean, zero-nag, 100% portable `.exe` — manage **Nginx**, **Apache**, **
 EnvStackUI/
 ├── EnvStackUI.exe
 ├── envstack.json
-├── bin/          # Portable binaries (nginx, apache, php, mysql, mailpit, node, python, go, git, composer)
-├── etc/          # Auto-generated Nginx, Apache, PHP, MySQL configs & local SSL certificates
+├── bin/          # Portable binaries (nginx, apache, php, mysql, postgres, redis, mailpit, node, python, go, git, composer)
+├── etc/          # Auto-generated Nginx, Apache, PHP, MySQL, Redis configs & local SSL certificates
 ├── www/          # Document root for auto virtual hosts (*.test)
-├── data/         # Persistent MariaDB / MySQL database files
+├── data/         # Persistent MariaDB / MySQL, PostgreSQL, and Redis data files
 ├── logs/         # Application and service logs
 ├── tmp/          # Temporary archives, updates, and cached package lists
 └── usr/          # Bundled utilities (Adminer)

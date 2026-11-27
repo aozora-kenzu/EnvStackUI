@@ -1,6 +1,8 @@
+mod cli;
 mod dns;
 mod logs;
 mod mailpit;
+mod mcp;
 mod packages;
 mod phpext;
 mod portable;
@@ -10,6 +12,8 @@ mod ssl;
 mod terminal;
 mod updater;
 mod vhosts;
+
+pub use cli::try_handle_cli;
 
 use dns::WildcardDnsManager;
 use dns::WildcardDnsStatus;
@@ -108,6 +112,12 @@ fn services_to_start_all(inv: &Inventory, cfg: &AppConfig) -> Vec<&'static str> 
     if scanner::get_active_binary(inv, cfg, "mysql").is_some() {
         ids.push("mysql");
     }
+    if scanner::get_active_binary(inv, cfg, "postgres").is_some() {
+        ids.push("postgres");
+    }
+    if scanner::get_active_binary(inv, cfg, "redis").is_some() {
+        ids.push("redis");
+    }
     if scanner::get_active_binary(inv, cfg, "mailpit").is_some() {
         ids.push("mailpit");
     }
@@ -152,7 +162,7 @@ fn restart_all_with_clones(
     let targets: Vec<&'static str> = if running_ids.is_empty() {
         services_to_start_all(inv, cfg)
     } else {
-        ["php", "mysql", "mailpit", "apache", "nginx"]
+        ["php", "mysql", "postgres", "redis", "mailpit", "apache", "nginx"]
             .into_iter()
             .filter(|id| running_ids.contains(*id) && scanner::get_active_binary(inv, cfg, id).is_some())
             .collect()
@@ -715,6 +725,7 @@ async fn list_databases(engine: String, state: State<'_, AppState>) -> Result<Ve
     let inv = state.inventory.lock().unwrap().clone();
     tokio::task::spawn_blocking(move || match engine.as_str() {
         "mysql" => services::list_mysql_databases(&cfg, &inv).map_err(|e| format!("{e:#}")),
+        "postgres" => services::list_postgres_databases(&cfg, &inv).map_err(|e| format!("{e:#}")),
         other => Err(format!("Unsupported database engine: {other}")),
     })
     .await
@@ -731,6 +742,9 @@ async fn create_database(
     let inv = state.inventory.lock().unwrap().clone();
     tokio::task::spawn_blocking(move || match engine.as_str() {
         "mysql" => services::create_mysql_database(&name, &cfg, &inv).map_err(|e| format!("{e:#}")),
+        "postgres" => {
+            services::create_postgres_database(&name, &cfg, &inv).map_err(|e| format!("{e:#}"))
+        }
         other => Err(format!("Unsupported database engine: {other}")),
     })
     .await

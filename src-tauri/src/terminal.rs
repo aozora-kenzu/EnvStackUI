@@ -1,4 +1,4 @@
-use crate::portable::{AppConfig, CREATE_NO_WINDOW};
+use crate::portable::{AppConfig, PortablePaths, CREATE_NO_WINDOW};
 use crate::scanner::{get_active_binary, BinaryItem, Inventory};
 use crate::vhosts;
 use anyhow::{anyhow, Context, Result};
@@ -63,7 +63,8 @@ pub fn build_active_bin_dirs_for_cwd(
     cwd: Option<&Path>,
 ) -> Vec<String> {
     let order = [
-        "php", "node", "composer", "git", "python", "go", "mysql", "nginx", "apache", "mailpit",
+        "php", "node", "composer", "git", "python", "go", "mysql", "postgres", "redis", "nginx",
+        "apache", "mailpit",
     ];
     let mut dirs = Vec::new();
     let mut seen = HashSet::new();
@@ -95,6 +96,15 @@ pub fn build_combined_path(bin_dirs: &[String]) -> String {
     format!("{};{}", bin_dirs.join(";"), current)
 }
 
+pub fn ensure_cli_shim(tmp_dir: &Path) -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    std::fs::create_dir_all(tmp_dir).ok()?;
+    let shim_path = tmp_dir.join("envstack.cmd");
+    let content = format!("@echo off\r\n\"{}\" %*\r\n", exe.to_string_lossy());
+    let _ = std::fs::write(&shim_path, content);
+    Some(tmp_dir.to_string_lossy().to_string())
+}
+
 pub fn open_terminal(
     profile: &str,
     cwd: &Path,
@@ -106,7 +116,14 @@ pub fn open_terminal(
     } else {
         std::env::current_dir().unwrap_or_else(|_| Path::new("C:\\").to_path_buf())
     };
-    let bin_dirs = build_active_bin_dirs_for_cwd(config, inventory, Some(&work_dir));
+    let mut bin_dirs = build_active_bin_dirs_for_cwd(config, inventory, Some(&work_dir));
+    if let Ok(paths) = PortablePaths::resolve() {
+        if let Some(shim_dir) = ensure_cli_shim(&paths.tmp) {
+            if !bin_dirs.iter().any(|d| d.eq_ignore_ascii_case(&shim_dir)) {
+                bin_dirs.push(shim_dir);
+            }
+        }
+    }
     let combined_path = build_combined_path(&bin_dirs);
 
     let banner = "EnvStackUI Portable Shell";

@@ -40,6 +40,8 @@ const CATEGORIES: { id: string; label: string; hint: string }[] = [
   { id: 'nginx', label: 'Nginx', hint: 'nginx.org' },
   { id: 'apache', label: 'Apache', hint: 'apachelounge.com' },
   { id: 'mysql', label: 'MariaDB', hint: 'mariadb.org' },
+  { id: 'postgres', label: 'PostgreSQL', hint: 'theseus-rs/postgresql-binaries' },
+  { id: 'redis', label: 'Redis', hint: 'redis-windows/redis-windows' },
   { id: 'go', label: 'Go', hint: 'go.dev' },
   { id: 'mailpit', label: 'Mailpit', hint: 'axllent/mailpit' },
   { id: 'composer', label: 'Composer', hint: 'getcomposer.org' },

@@ -16,6 +16,8 @@ export interface PortConfig {
   apache_https: number;
   php_cgi: number;
   mysql: number;
+  postgres: number;
+  redis: number;
   mailpit_smtp: number;
   mailpit_http: number;
 }

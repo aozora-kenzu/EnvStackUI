@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FolderOpen, Loader2, Save, ShieldAlert } from 'lucide-react';
+import { Check, Copy, FolderOpen, Loader2, Save, ShieldAlert } from 'lucide-react';
 import { useI18n } from '../i18n';
 import { api } from '../lib/api';
 import type { AppBootstrap, AppConfig, LanguageCode, ThemeMode } from '../types/envstack';
@@ -19,6 +19,7 @@ export function SettingsView({
   const [draft, setDraft] = useState<AppConfig>(bootstrap.config);
   const [saving, setSaving] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
+  const [copiedMcp, setCopiedMcp] = useState(false);
 
   useEffect(() => {
     setDraft(bootstrap.config);
@@ -240,6 +241,8 @@ export function SettingsView({
               ['nginx_https', 'Nginx HTTPS'],
               ['php_cgi', 'PHP FastCGI'],
               ['mysql', 'MariaDB / MySQL'],
+              ['postgres', 'PostgreSQL'],
+              ['redis', 'Redis'],
               ['mailpit_http', 'Mailpit UI'],
               ['mailpit_smtp', 'Mailpit SMTP'],
             ] as const
@@ -329,6 +332,64 @@ export function SettingsView({
           />
           <span>{t.settings.autoCheckUpdates}</span>
         </label>
+      </section>
+
+      {/* CLI & AI MCP Integration */}
+      <section className="ui-panel p-4 flex flex-col gap-2.5">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <h2 className="text-[13px] font-semibold">{t.settings.mcpSection}</h2>
+            <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              {t.settings.mcpDesc}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const snippet = JSON.stringify(
+                {
+                  mcpServers: {
+                    envstack: {
+                      command: `${bootstrap.root_dir}\\envstack-ui.exe`,
+                      args: ['mcp'],
+                    },
+                  },
+                },
+                null,
+                2,
+              );
+              void navigator.clipboard.writeText(snippet).then(() => {
+                setCopiedMcp(true);
+                setTimeout(() => setCopiedMcp(false), 1800);
+              });
+            }}
+            className="ui-btn text-[11px]"
+          >
+            {copiedMcp ? <Check size={12} style={{ color: 'var(--green)' }} /> : <Copy size={12} />}
+            <span>{copiedMcp ? t.settings.mcpCopied : t.settings.mcpCopyBtn}</span>
+          </button>
+        </div>
+        <pre
+          className="p-3 rounded border font-mono text-[11px] overflow-x-auto selectable"
+          style={{
+            background: 'var(--bg-input)',
+            borderColor: 'var(--border)',
+            color: 'var(--text-primary)',
+          }}
+        >
+          {JSON.stringify(
+            {
+              mcpServers: {
+                envstack: {
+                  command: `${bootstrap.root_dir}\\envstack-ui.exe`,
+                  args: ['mcp'],
+                },
+              },
+            },
+            null,
+            2,
+          )}
+        </pre>
       </section>
     </div>
   );
